@@ -919,7 +919,7 @@ export default function AbsensiPage() {
                   setSessionDate(new Date().toISOString().split('T')[0])
                   setOpenAddSession(true)
                 }}
-                className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6"
+                className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
                 aria-label="Tambah Sesi"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">

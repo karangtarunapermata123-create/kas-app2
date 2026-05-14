@@ -14,10 +14,14 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
   const [error, setError] = useState<string | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanning = useRef(false)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (open && !isScanning.current) {
-      startScanning()
+      const timer = setTimeout(() => {
+        startScanning()
+      }, 300)
+      return () => clearTimeout(timer)
     }
     
     return () => {
@@ -30,7 +34,12 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
     
     try {
       setError(null)
-      const scanner = new Html5Qrcode('qr-reader')
+      if (!containerRef.current) {
+        throw new Error('Container not found')
+      }
+      const scannerId = 'qr-reader-' + Date.now()
+      containerRef.current.id = scannerId
+      const scanner = new Html5Qrcode(scannerId)
       scannerRef.current = scanner
       isScanning.current = true
 
@@ -87,7 +96,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
         )}
         
         <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
-          <div id="qr-reader" className="w-full"></div>
+          <div ref={containerRef} className="w-full"></div>
           {!scanning && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-sm text-slate-500 dark:text-slate-400">Memulai kamera...</div>
