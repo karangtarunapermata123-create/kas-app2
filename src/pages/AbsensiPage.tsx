@@ -666,7 +666,12 @@ export default function AbsensiPage() {
             type="button"
             aria-label="Scan QR Code"
             className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-            onClick={() => setOpenQRScanner(true)}
+            onClick={() => {
+              setOpenQRScanner(false)
+              setTimeout(() => {
+                setOpenQRScanner(true)
+              }, 50)
+            }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
               <rect x="3" y="3" width="7" height="7" />
@@ -1002,7 +1007,12 @@ export default function AbsensiPage() {
             type="button"
             aria-label="Scan QR Code"
             className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-            onClick={() => setOpenQRScanner(true)}
+            onClick={() => {
+              setOpenQRScanner(false)
+              setTimeout(() => {
+                setOpenQRScanner(true)
+              }, 50)
+            }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
               <rect x="3" y="3" width="7" height="7" />
@@ -1119,7 +1129,12 @@ export default function AbsensiPage() {
           type="button"
           aria-label="Scan QR Code"
           className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-          onClick={() => setOpenQRScanner(true)}
+          onClick={() => {
+            setOpenQRScanner(false)
+            setTimeout(() => {
+              setOpenQRScanner(true)
+            }, 50)
+          }}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" />
