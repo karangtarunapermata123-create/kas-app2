@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import Button from '../components/Button'
@@ -19,6 +19,7 @@ import {
   deleteActivitySession,
   getAttendanceByActivity,
   getAttendanceBySession,
+  getAttendanceRecords,
   addAttendanceRecord,
   updateAttendanceRecord,
   deleteAttendanceRecord,
@@ -191,8 +192,6 @@ function StatusModal({ open, memberName, currentStatus, onClose, onSet, onDelete
 
 // Per-session attendance counts, keyed by session id
 type SessionStats = Record<string, { total: number; hadir: number }>
-// Per-activity stats for the activities list, keyed by activity id
-type ActivityStats = Record<string, { total: number; hadir: number; sesCount: number }>
 
 export default function AbsensiPage() {
   const { activityId, sessionId } = useParams<{ activityId: string; sessionId: string }>()
@@ -206,10 +205,37 @@ export default function AbsensiPage() {
   const [allProfiles, setAllProfiles] = useState<Profile[]>([])
   const [filterType, setFilterType] = useState<'semua' | 'sekali' | 'rutin'>('semua')
 
+  // Drag to scroll for table
+  const scrollContainerRef = useRef<HTMLDivElement>(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [startX, setStartX] = useState(0)
+  const [scrollLeft, setScrollLeft] = useState(0)
+
+  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!scrollContainerRef.current) return
+    setIsDragging(true)
+    setStartX(e.pageX - scrollContainerRef.current.offsetLeft)
+    setScrollLeft(scrollContainerRef.current.scrollLeft)
+  }
+
+  const handleMouseLeave = () => {
+    setIsDragging(false)
+  }
+
+  const handleMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isDragging || !scrollContainerRef.current) return
+    e.preventDefault()
+    const x = e.pageX - scrollContainerRef.current.offsetLeft
+    const walk = (x - startX) * 2
+    scrollContainerRef.current.scrollLeft = scrollLeft - walk
+  }
+
   // Attendance counts for each session row in the sessions table
   const [sessionStats, setSessionStats] = useState<SessionStats>({})
-  // Attendance + session counts for each activity row in the activities list
-  const [activityStats, setActivityStats] = useState<ActivityStats>({})
 
   // Modal: tambah kegiatan
   const [openAddActivity, setOpenAddActivity] = useState(false)
@@ -224,11 +250,19 @@ export default function AbsensiPage() {
   const [sessionLabel, setSessionLabel] = useState('')
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0])
 
+  // Modal: hapus kegiatan
+  const [openDeleteActivity, setOpenDeleteActivity] = useState(false)
+  const [deleteActivityId, setDeleteActivityId] = useState<string | null>(null)
+  const [deleteActivityName, setDeleteActivityName] = useState('')
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
+
   // Modal: status
   const [openStatus, setOpenStatus] = useState(false)
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null)
   const [activeMemberName, setActiveMemberName] = useState<string | null>(null)
   const [activeStatus, setActiveStatus] = useState<AttendanceRecord['status'] | null>(null)
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null) // For routine activities
+  const [openTooltipSessionId, setOpenTooltipSessionId] = useState<string | null>(null) // For session info tooltip
 
   // QR Code states
   const [openQRScanner, setOpenQRScanner] = useState(false)
@@ -280,17 +314,46 @@ export default function AbsensiPage() {
 
   const loadRecords = useCallback(async () => {
     if (sessionId) {
+      // Load records for specific session
       const data = await getAttendanceBySession(sessionId)
       setRecords(data)
     } else if (activityId) {
-      const data = await getAttendanceByActivity(activityId)
-      setRecords(data)
+      // For routine activities, load ALL records from ALL sessions
+      const activity = activities.find(a => a.id === activityId)
+      if (activity?.type === 'rutin') {
+        // Load all attendance records for this activity (across all sessions)
+        const allRecords = await getAttendanceRecords()
+        const filtered = allRecords.filter(r => r.activityId === activityId)
+        setRecords(filtered)
+      } else {
+        // For one-time activities, load records without sessionId
+        const data = await getAttendanceByActivity(activityId)
+        setRecords(data)
+      }
     }
-  }, [activityId, sessionId])
+  }, [activityId, sessionId, activities])
 
   useEffect(() => {
     loadRecords()
   }, [loadRecords])
+
+  // Close tooltip when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (openTooltipSessionId) {
+        const tooltipEl = document.getElementById(`session-info-${openTooltipSessionId}`)
+        const buttonEl = document.getElementById(`session-btn-${openTooltipSessionId}`)
+        
+        if (tooltipEl && !tooltipEl.contains(event.target as Node) && 
+            buttonEl && !buttonEl.contains(event.target as Node)) {
+          setOpenTooltipSessionId(null)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [openTooltipSessionId])
 
   // ── Load per-session stats when sessions list changes ────────────────────
 
@@ -312,32 +375,6 @@ export default function AbsensiPage() {
     load()
     return () => { cancelled = true }
   }, [sessions])
-
-  // ── Load per-activity stats when activities list changes ─────────────────
-
-  useEffect(() => {
-    if (!activities.length) {
-      setActivityStats({})
-      return
-    }
-    let cancelled = false
-    async function load() {
-      const entries = await Promise.all(
-        activities.map(async (a) => {
-          if (a.type === 'rutin') {
-            const sesses = await getSessionsByActivity(a.id)
-            return [a.id, { total: 0, hadir: 0, sesCount: sesses.length }] as const
-          } else {
-            const recs = await getAttendanceByActivity(a.id)
-            return [a.id, { total: recs.length, hadir: recs.filter((r) => r.status === 'hadir').length, sesCount: 0 }] as const
-          }
-        })
-      )
-      if (!cancelled) setActivityStats(Object.fromEntries(entries))
-    }
-    load()
-    return () => { cancelled = true }
-  }, [activities])
 
   // ── Kegiatan ────────────────────────────────────────────────────────────
 
@@ -361,11 +398,28 @@ export default function AbsensiPage() {
   }
 
   async function handleDeleteActivity(id: string) {
-    if (!confirm('Hapus kegiatan ini beserta seluruh data absensinya?')) return
-    await deleteActivity(id)
+    const activity = activities.find(a => a.id === id)
+    if (!activity) return
+    
+    setDeleteActivityId(id)
+    setDeleteActivityName(activity.name)
+    setDeleteConfirmText('')
+    setOpenDeleteActivity(true)
+  }
+
+  async function confirmDeleteActivity() {
+    if (!deleteActivityId) return
+    
+    await deleteActivity(deleteActivityId)
     const data = await getActivities()
     setActivities(data)
-    if (activityId === id) navigate('/absensi')
+    if (activityId === deleteActivityId) navigate('/absensi')
+    
+    // Close modal and reset
+    setOpenDeleteActivity(false)
+    setDeleteActivityId(null)
+    setDeleteActivityName('')
+    setDeleteConfirmText('')
   }
 
   // ── Sesi ────────────────────────────────────────────────────────────────
@@ -399,8 +453,24 @@ export default function AbsensiPage() {
   async function handleSetStatus(status: AttendanceRecord['status']) {
     if (!activeProfileId || !activeMemberName || !activityId) return
     
-    // Cari apakah sudah ada record untuk user ini
-    const existingRecord = records.find(r => r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim())
+    // Determine which sessionId to use
+    const targetSessionId = activeSessionId || sessionId
+    
+    // Cari apakah sudah ada record untuk user ini di session ini
+    let existingRecord: AttendanceRecord | undefined
+    
+    if (targetSessionId) {
+      // For routine activities with sessions
+      existingRecord = records.find(r => 
+        r.sessionId === targetSessionId &&
+        r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim()
+      )
+    } else {
+      // For one-time activities
+      existingRecord = records.find(r => 
+        r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim()
+      )
+    }
     
     if (existingRecord) {
       // Update record yang sudah ada
@@ -409,7 +479,7 @@ export default function AbsensiPage() {
       // Buat record baru
       await addAttendanceRecord({
         activityId,
-        sessionId: sessionId,
+        sessionId: targetSessionId,
         memberName: activeMemberName,
         status,
       })
@@ -420,13 +490,28 @@ export default function AbsensiPage() {
     setActiveProfileId(null)
     setActiveMemberName(null)
     setActiveStatus(null)
+    setActiveSessionId(null)
   }
 
   async function handleDeleteStatus() {
     if (!activeMemberName) return
     
-    // Cari record untuk user ini
-    const existingRecord = records.find(r => r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim())
+    // Determine which sessionId to use
+    const targetSessionId = activeSessionId || sessionId
+    
+    // Cari record untuk user ini di session ini
+    let existingRecord: AttendanceRecord | undefined
+    
+    if (targetSessionId) {
+      existingRecord = records.find(r => 
+        r.sessionId === targetSessionId &&
+        r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim()
+      )
+    } else {
+      existingRecord = records.find(r => 
+        r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim()
+      )
+    }
     
     if (existingRecord) {
       // Hapus record
@@ -438,6 +523,7 @@ export default function AbsensiPage() {
     setActiveProfileId(null)
     setActiveMemberName(null)
     setActiveStatus(null)
+    setActiveSessionId(null)
   }
 
   // ── QR Code Handlers ────────────────────────────────────────────────────
@@ -492,16 +578,19 @@ export default function AbsensiPage() {
       
       if (result.success) {
         setQrMessage({ type: 'success', text: result.message })
+        // Close scanner modal on success
+        setOpenQRScanner(false)
         await loadRecords()
         // Reload activities stats
         const data = await getActivities()
         setActivities(data)
+        // Clear success message after 4 seconds
+        setTimeout(() => setQrMessage(null), 4000)
       } else {
         setQrMessage({ type: 'error', text: result.message })
+        // Clear error message after 5 seconds
+        setTimeout(() => setQrMessage(null), 5000)
       }
-
-      // Clear message after 5 seconds
-      setTimeout(() => setQrMessage(null), 5000)
     } catch (error) {
       console.error('Error scanning QR:', error)
       setQrMessage({ type: 'error', text: 'Gagal memproses QR code' })
@@ -529,36 +618,17 @@ export default function AbsensiPage() {
   if (selectedActivity && selectedSession) {
     return (
       <div className="grid gap-4">
-        {/* QR Message */}
-        {qrMessage && (
-          <div className={`rounded-lg border px-4 py-3 text-sm ${
-            qrMessage.type === 'success' 
-              ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
-              : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
-          }`}>
-            {qrMessage.text}
-          </div>
-        )}
-
+        {/* Info dan tombol admin */}
         <div className="flex items-center justify-between gap-2">
           <div className="text-xs text-slate-500 dark:text-slate-400">
             <span>{formatDate(selectedSession.date)}</span>
           </div>
-          <div className="flex gap-2">
-            {/* Tombol Scan QR untuk anggota */}
-            <Button 
-              variant="secondary" 
-              onClick={() => setOpenQRScanner(true)}
-            >
-              📷 Scan QR
+          {/* Tombol Tampilkan QR untuk admin */}
+          {userCanEdit && (
+            <Button onClick={handleShowQR}>
+              🔲 Tampilkan QR
             </Button>
-            {/* Tombol Tampilkan QR untuk admin */}
-            {userCanEdit && (
-              <Button onClick={handleShowQR}>
-                🔲 Tampilkan QR
-              </Button>
-            )}
-          </div>
+          )}
         </div>
 
         <AttendanceTable
@@ -582,12 +652,6 @@ export default function AbsensiPage() {
           onDelete={handleDeleteStatus}
         />
 
-        <QRScanner
-          open={openQRScanner}
-          onClose={() => setOpenQRScanner(false)}
-          onScan={handleScanQR}
-        />
-
         <QRDisplay
           open={openQRDisplay}
           onClose={() => setOpenQRDisplay(false)}
@@ -595,6 +659,23 @@ export default function AbsensiPage() {
           title={`QR Absensi - ${selectedSession.label}`}
           description={`${selectedActivity.name} - ${selectedSession.label}`}
         />
+
+        {/* FAB - Scan QR (untuk semua user) */}
+        {!openQRScanner && !openQRDisplay && (
+          <button
+            type="button"
+            aria-label="Scan QR Code"
+            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+            onClick={() => setOpenQRScanner(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+          </button>
+        )}
       </div>
     )
   }
@@ -622,100 +703,267 @@ export default function AbsensiPage() {
         </div>
 
         {isRutin ? (
-          /* ── Kegiatan rutin: tampilkan daftar sesi ── */
-          <Card
-            title="Sesi"
-            right={
-              userCanEdit ? (
-                <Button onClick={() => {
+          /* ── Kegiatan rutin: tampilkan tabel kehadiran semua sesi ── */
+          <>
+            {/* Header - RESPONSIVE */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rekap Kehadiran</h2>
+            </div>
+
+            {sessions.length === 0 ? (
+              <Card title="Sesi">
+                <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
+                  Belum ada sesi. Klik "+ Sesi" untuk menambahkan sesi baru.
+                </div>
+              </Card>
+            ) : (
+              <>
+                {/* Legend - COMPACT (di atas tabel) */}
+                <div className="mb-3 pb-3 border-b dark:border-slate-700 flex flex-wrap gap-2 sm:gap-3 text-xs">
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold">✓</span>
+                    <span className="text-slate-600 dark:text-slate-400">Hadir</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500 text-xs font-bold">~</span>
+                    <span className="text-slate-600 dark:text-slate-400">Izin</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500 text-xs font-bold">✗</span>
+                    <span className="text-slate-600 dark:text-slate-400">Tidak Hadir</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500"></span>
+                    <span className="text-slate-600 dark:text-slate-400">Belum</span>
+                  </div>
+                </div>
+
+                {/* Tabel dengan sticky column - COMPACT & RESPONSIVE */}
+                <div 
+                  ref={scrollContainerRef}
+                  onMouseDown={handleMouseDown}
+                  onMouseLeave={handleMouseLeave}
+                  onMouseUp={handleMouseUp}
+                  onMouseMove={handleMouseMove}
+                  className={`max-h-[70vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
+                >
+                  <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm" style={{ tableLayout: 'fixed' }}>
+                    <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                      <tr>
+                        {/* Sticky column header - Nama */}
+                        <th className="sticky left-0 top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-left font-semibold" style={{ width: '140px' }}>
+                          Nama
+                        </th>
+                        {/* Session headers - clickable */}
+                        {sessions.map((session, index) => {
+                          const stats = sessionStats[session.id]
+                          const hadir = stats?.hadir ?? 0
+                          const total = stats?.total ?? 0
+                          return (
+                            <th 
+                              key={session.id}
+                              className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-2 text-center font-semibold"
+                              style={{ width: '56px' }}
+                            >
+                              <div className="flex flex-col items-center">
+                                <button
+                                  id={`session-btn-${session.id}`}
+                                  type="button"
+                                  className="text-sm hover:text-slate-900 dark:hover:text-white transition font-bold"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setOpenTooltipSessionId(openTooltipSessionId === session.id ? null : session.id)
+                                  }}
+                                >
+                                  {index + 1}
+                                </button>
+                                {/* Info tooltip with QR and Delete button */}
+                                <div 
+                                  id={`session-info-${session.id}`}
+                                  className={`${openTooltipSessionId === session.id ? '' : 'hidden'} absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-slate-900 dark:bg-slate-700 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap`}
+                                >
+                                  <div className="font-normal text-left">
+                                    <div className="font-semibold mb-1">{session.label}</div>
+                                    <div className="text-slate-300 text-xs">{formatDate(session.date)}</div>
+                                    <div className="mt-1 pt-1 border-t border-slate-600">
+                                      <span className="text-emerald-400">{hadir}</span>
+                                      <span className="text-slate-400">/{total} hadir</span>
+                                    </div>
+                                    {/* Buttons */}
+                                    {userCanEdit && (
+                                      <div className="flex gap-1 mt-2">
+                                        {/* QR Button */}
+                                        <button
+                                          type="button"
+                                          onClick={async (e) => {
+                                            e.stopPropagation()
+                                            setOpenTooltipSessionId(null)
+                                            // Show QR for this session
+                                            try {
+                                              const token = await getOrGenerateSessionQRToken(session.id)
+                                              const baseUrl = window.location.origin
+                                              const qrUrl = `${baseUrl}/absensi/scan?token=${token}`
+                                              setQrData(qrUrl)
+                                              setOpenQRDisplay(true)
+                                            } catch (error) {
+                                              console.error('Error generating QR:', error)
+                                              alert('Gagal membuat QR code')
+                                            }
+                                          }}
+                                          className="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
+                                        >
+                                          🔲 QR
+                                        </button>
+                                        {/* Delete Button */}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setOpenTooltipSessionId(null)
+                                            handleDeleteSession(session.id)
+                                          }}
+                                          className="flex-1 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition"
+                                        >
+                                          🗑️ Hapus
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  {/* Arrow */}
+                                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-slate-700 rotate-45"></div>
+                                </div>
+                              </div>
+                            </th>
+                          )
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allProfiles.length === 0 ? (
+                        <tr>
+                          <td colSpan={sessions.length + 1} className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                            Belum ada user. Tambahkan user di halaman Pengaturan.
+                          </td>
+                        </tr>
+                      ) : (
+                        allProfiles.map((profile, profileIndex) => {
+                          return (
+                            <tr key={profile.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                              {/* Sticky column - Nama */}
+                              <td className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs sm:text-sm font-medium text-slate-900 dark:text-white" style={{ minWidth: '140px' }}>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-slate-400 dark:text-slate-500 text-xs w-4">{profileIndex + 1}</span>
+                                  <span className="truncate">{profile.full_name}</span>
+                                </div>
+                              </td>
+                              {/* Session attendance cells */}
+                              {sessions.map((session) => {
+                                // Get attendance record for this profile in this session
+                                const sessionRecords = records.filter(r => r.sessionId === session.id)
+                                const record = sessionRecords.find(r => 
+                                  r.memberName.toLowerCase().trim() === profile.full_name.toLowerCase().trim()
+                                )
+                                const status = record?.status ?? null
+                                
+                                return (
+                                  <td key={session.id} className="border-b border-r border-slate-200 dark:border-slate-700 py-2">
+                                    <div className="flex items-center justify-center">
+                                      <button
+                                        type="button"
+                                        onClick={async () => {
+                                          if (!userCanEdit) return
+                                          // Set context untuk modal
+                                          setActiveProfileId(profile.id)
+                                          setActiveMemberName(profile.full_name)
+                                          setActiveStatus(status)
+                                          // Store sessionId untuk update
+                                          setActiveSessionId(session.id)
+                                          setOpenStatus(true)
+                                        }}
+                                        disabled={!userCanEdit}
+                                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition ${
+                                          userCanEdit ? 'hover:scale-110 cursor-pointer' : 'cursor-not-allowed opacity-60'
+                                        } ${
+                                          status === 'hadir'
+                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                                            : status === 'izin'
+                                              ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500'
+                                              : status === 'tidak-hadir'
+                                                ? 'border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500'
+                                                : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500 hover:border-slate-400 dark:hover:border-slate-500'
+                                        }`}
+                                        aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
+                                      >
+                                        {status === 'hadir' ? '✓' : status === 'izin' ? '~' : status === 'tidak-hadir' ? '✗' : ''}
+                                      </button>
+                                    </div>
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin */}
+            {userCanEdit && isRutin && (
+              <button
+                type="button"
+                onClick={() => {
                   setSessionLabel(suggestSessionLabel(selectedActivity))
                   setSessionDate(new Date().toISOString().split('T')[0])
                   setOpenAddSession(true)
-                }}>
-                  + Sesi
-                </Button>
-              ) : undefined
-            }
-          >
-            {sessions.length === 0 ? (
-              <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
-                Belum ada sesi. Klik "+ Sesi" untuk menambahkan sesi baru.
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                  <thead className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    <tr>
-                      <th className="py-2 pr-3">Sesi</th>
-                      <th className="py-2 pr-3">Tanggal</th>
-                      <th className="py-2 pr-3 text-right">Peserta</th>
-                      <th className="py-2 pr-3 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sessions.map((session) => {
-                      const stats = sessionStats[session.id]
-                      const hadir = stats?.hadir ?? 0
-                      const total = stats?.total ?? 0
-                      return (
-                        <tr
-                          key={session.id}
-                          className="border-t dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                          onClick={() => navigate(`/absensi/${activityId}/sesi/${session.id}`)}
-                        >
-                          <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">{session.label}</td>
-                          <td className="py-2 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">{session.date}</td>
-                          <td className="py-2 pr-3 text-right text-slate-600 dark:text-slate-400">
-                            <span className="font-medium text-emerald-700 dark:text-emerald-500">{hadir}</span>
-                            <span className="text-slate-400 dark:text-slate-500">/{total}</span>
-                          </td>
-                          <td className="py-2 pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                            {userCanEdit && (
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSession(session.id)}
-                                className="text-xs text-rose-600 dark:text-rose-400 hover:underline"
-                              >
-                                Hapus
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                }}
+                className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6"
+                aria-label="Tambah Sesi"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+                  <path d="M12 5v14" /><path d="M5 12h14" />
+                </svg>
+              </button>
             )}
-          </Card>
+
+            {/* Status Modal untuk edit kehadiran */}
+            <StatusModal
+              open={openStatus}
+              memberName={activeMemberName}
+              currentStatus={activeStatus}
+              onClose={() => { 
+                setOpenStatus(false)
+                setActiveProfileId(null)
+                setActiveMemberName(null)
+                setActiveStatus(null)
+                setActiveSessionId(null)
+              }}
+              onSet={handleSetStatus}
+              onDelete={handleDeleteStatus}
+            />
+
+            {/* QR Display Modal */}
+            <QRDisplay
+              open={openQRDisplay}
+              onClose={() => setOpenQRDisplay(false)}
+              data={qrData}
+              title={selectedActivity ? `QR Absensi - ${selectedActivity.name}` : 'QR Absensi'}
+              description={selectedActivity?.name}
+            />
+          </>
         ) : (
           /* ── Kegiatan sekali: langsung tampilkan absensi ── */
           <>
-            {/* QR Message */}
-            {qrMessage && (
-              <div className={`rounded-lg border px-4 py-3 text-sm ${
-                qrMessage.type === 'success' 
-                  ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
-                  : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
-              }`}>
-                {qrMessage.text}
-              </div>
-            )}
-
-            {/* QR Buttons */}
-            <div className="flex justify-end gap-2">
-              <Button 
-                variant="secondary" 
-                onClick={() => setOpenQRScanner(true)}
-              >
-                📷 Scan QR
-              </Button>
-              {userCanEdit && (
+            {/* Tombol Tampilkan QR untuk admin */}
+            {userCanEdit && (
+              <div className="flex justify-end">
                 <Button onClick={handleShowQR}>
                   🔲 Tampilkan QR
                 </Button>
-              )}
-            </div>
+              </div>
+            )}
 
             <AttendanceTable
               allProfiles={allProfiles}
@@ -738,12 +986,6 @@ export default function AbsensiPage() {
               onDelete={handleDeleteStatus}
             />
 
-            <QRScanner
-              open={openQRScanner}
-              onClose={() => setOpenQRScanner(false)}
-              onScan={handleScanQR}
-            />
-
             <QRDisplay
               open={openQRDisplay}
               onClose={() => setOpenQRDisplay(false)}
@@ -752,6 +994,23 @@ export default function AbsensiPage() {
               description={selectedActivity.name}
             />
           </>
+        )}
+
+        {/* FAB - Scan QR (untuk semua user di detail kegiatan) */}
+        {!openQRScanner && !openQRDisplay && (
+          <button
+            type="button"
+            aria-label="Scan QR Code"
+            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+            onClick={() => setOpenQRScanner(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" />
+              <rect x="14" y="3" width="7" height="7" />
+              <rect x="14" y="14" width="7" height="7" />
+              <rect x="3" y="14" width="7" height="7" />
+            </svg>
+          </button>
         )}
 
         {/* Modal tambah sesi */}
@@ -814,16 +1073,11 @@ export default function AbsensiPage() {
                   <th className="py-2 pr-3">Nama Kegiatan</th>
                   <th className="py-2 pr-3">Tipe</th>
                   <th className="py-2 pr-3">Tanggal</th>
-                  <th className="py-2 pr-3 text-right">Peserta</th>
                   <th className="py-2 pr-3 text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((activity) => {
-                  const stats = activityStats[activity.id]
-                  const hadir = stats?.hadir ?? 0
-                  const total = stats?.total ?? 0
-                  const sesCount = stats?.sesCount ?? 0
                   return (
                     <tr
                       key={activity.id}
@@ -839,16 +1093,6 @@ export default function AbsensiPage() {
                         </span>
                       </td>
                       <td className="py-2 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">{activity.date}</td>
-                      <td className="py-2 pr-3 text-right text-slate-600 dark:text-slate-400">
-                        {activity.type === 'rutin' ? (
-                          <span>{sesCount} sesi</span>
-                        ) : (
-                          <>
-                            <span className="font-medium text-emerald-700 dark:text-emerald-500">{hadir}</span>
-                            <span className="text-slate-400 dark:text-slate-500">/{total}</span>
-                          </>
-                        )}
-                      </td>
                       <td className="py-2 pr-3 text-right" onClick={(e) => e.stopPropagation()}>
                         {userCanEdit && (
                           <button
@@ -869,18 +1113,67 @@ export default function AbsensiPage() {
         )}
       </Card>
 
-      {/* FAB */}
+      {/* FAB - Scan QR (untuk semua user) */}
+      {!openQRScanner && !openQRDisplay && (
+        <button
+          type="button"
+          aria-label="Scan QR Code"
+          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+          onClick={() => setOpenQRScanner(true)}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" />
+            <rect x="14" y="3" width="7" height="7" />
+            <rect x="14" y="14" width="7" height="7" />
+            <rect x="3" y="14" width="7" height="7" />
+          </svg>
+        </button>
+      )}
+
+      {/* FAB - Tambah Kegiatan (hanya admin) */}
       {userCanEdit && (
         <button
           type="button"
           aria-label="Tambah kegiatan"
-          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6"
+          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
           onClick={() => setOpenAddActivity(true)}
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
             <path d="M12 5v14" /><path d="M5 12h14" />
           </svg>
         </button>
+      )}
+
+      {/* QR Scanner Modal - Global */}
+      <QRScanner
+        open={openQRScanner}
+        onClose={() => setOpenQRScanner(false)}
+        onScan={handleScanQR}
+      />
+
+      {/* QR Message - Global */}
+      {qrMessage && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg animate-in fade-in slide-in-from-top-2 duration-300 max-w-md ${
+          qrMessage.type === 'success' 
+            ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
+            : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
+        }`}>
+          <div className="flex items-center gap-2">
+            {qrMessage.type === 'success' ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="8" x2="12" y2="12"></line>
+                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+              </svg>
+            )}
+            <span className="font-medium">{qrMessage.text}</span>
+          </div>
+        </div>
       )}
 
       {/* Modal tambah kegiatan */}
@@ -928,6 +1221,72 @@ export default function AbsensiPage() {
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="secondary" onClick={() => setOpenAddActivity(false)}>Batal</Button>
             <Button onClick={handleAddActivity} disabled={!activityName.trim()}>Simpan</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal hapus kegiatan */}
+      <Modal 
+        open={openDeleteActivity} 
+        title="Hapus Kegiatan" 
+        onClose={() => {
+          setOpenDeleteActivity(false)
+          setDeleteActivityId(null)
+          setDeleteActivityName('')
+          setDeleteConfirmText('')
+        }}
+      >
+        <div className="grid gap-4">
+          <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 p-3">
+            <div className="flex gap-2">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-600 dark:text-rose-400 shrink-0">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                <line x1="12" y1="9" x2="12" y2="13"></line>
+                <line x1="12" y1="17" x2="12.01" y2="17"></line>
+              </svg>
+              <div className="text-sm text-rose-700 dark:text-rose-400">
+                <div className="font-semibold mb-1">Peringatan!</div>
+                <div>Tindakan ini akan menghapus kegiatan <span className="font-semibold">"{deleteActivityName}"</span> beserta seluruh data absensi dan sesi yang terkait. Tindakan ini tidak dapat dibatalkan.</div>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+              Untuk konfirmasi, ketik nama kegiatan: <span className="font-semibold text-slate-900 dark:text-white">{deleteActivityName}</span>
+            </div>
+            <Input
+              placeholder="Ketik nama kegiatan"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <Button 
+              variant="secondary" 
+              onClick={() => {
+                setOpenDeleteActivity(false)
+                setDeleteActivityId(null)
+                setDeleteActivityName('')
+                setDeleteConfirmText('')
+              }}
+            >
+              Batal
+            </Button>
+            <button
+              type="button"
+              onClick={confirmDeleteActivity}
+              disabled={deleteConfirmText !== deleteActivityName}
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                deleteConfirmText === deleteActivityName
+                  ? 'bg-rose-600 text-white hover:bg-rose-700'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+              }`}
+            >
+              Hapus Kegiatan
+            </button>
           </div>
         </div>
       </Modal>
