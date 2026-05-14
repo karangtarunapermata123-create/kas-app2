@@ -12,20 +12,15 @@ type QRScannerProps = {
 export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const scannerId = useRef('qr-reader-' + Date.now())
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanning = useRef(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const [key, setKey] = useState(0)
 
   useEffect(() => {
     if (open) {
-      setKey(prev => prev + 1)
       setScanning(false)
       setError(null)
-      const timer = setTimeout(() => {
-        startScanning()
-      }, 500)
-      return () => clearTimeout(timer)
+      startScanning()
     } else {
       stopScanning()
     }
@@ -37,12 +32,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
     try {
       setError(null)
       setScanning(false)
-      if (!containerRef.current) {
-        throw new Error('Container not found')
-      }
-      const scannerId = 'qr-reader-' + Date.now() + '-' + key
-      containerRef.current.id = scannerId
-      const scanner = new Html5Qrcode(scannerId)
+      const scanner = new Html5Qrcode(scannerId.current)
       scannerRef.current = scanner
       isScanning.current = true
 
@@ -82,6 +72,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
       scannerRef.current = null
       isScanning.current = false
       setScanning(false)
+      scannerId.current = 'qr-reader-' + Date.now()
     }
   }
 
@@ -92,7 +83,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
 
   return (
     <Modal open={open} title="Scan QR Code Absensi" onClose={handleClose}>
-      <div key={key} className="grid gap-4">
+      <div className="grid gap-4">
         {error && (
           <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-4 py-3 text-sm text-rose-700 dark:text-rose-400">
             {error}
@@ -100,7 +91,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
         )}
         
         <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
-          <div ref={containerRef} className="w-full"></div>
+          <div id={scannerId.current} className="w-full"></div>
           {!scanning && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-sm text-slate-500 dark:text-slate-400">Memulai kamera...</div>
