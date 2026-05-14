@@ -15,16 +15,18 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanning = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [key, setKey] = useState(0)
 
   useEffect(() => {
-    if (open && !isScanning.current) {
+    if (open) {
+      setKey(prev => prev + 1)
+      setScanning(false)
+      setError(null)
       const timer = setTimeout(() => {
         startScanning()
-      }, 300)
+      }, 500)
       return () => clearTimeout(timer)
-    }
-    
-    return () => {
+    } else {
       stopScanning()
     }
   }, [open])
@@ -34,10 +36,11 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
     
     try {
       setError(null)
+      setScanning(false)
       if (!containerRef.current) {
         throw new Error('Container not found')
       }
-      const scannerId = 'qr-reader-' + Date.now()
+      const scannerId = 'qr-reader-' + Date.now() + '-' + key
       containerRef.current.id = scannerId
       const scanner = new Html5Qrcode(scannerId)
       scannerRef.current = scanner
@@ -64,6 +67,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
       console.error('Error starting scanner:', err)
       setError('Tidak dapat mengakses kamera. Pastikan izin kamera sudah diberikan.')
       isScanning.current = false
+      setScanning(false)
     }
   }
 
@@ -88,7 +92,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
 
   return (
     <Modal open={open} title="Scan QR Code Absensi" onClose={handleClose}>
-      <div className="grid gap-4">
+      <div key={key} className="grid gap-4">
         {error && (
           <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-4 py-3 text-sm text-rose-700 dark:text-rose-400">
             {error}
