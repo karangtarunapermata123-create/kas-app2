@@ -15,10 +15,13 @@ import {
   addBook,
   deleteBook,
   getBooks,
+  getKolektifSessions,
+  getKolektifConfig,
   getRoutineCategories,
   getRoutineChecklists,
   getRoutineFrequency,
   getRoutineMembers,
+  getRoutineSessions,
   getTransactions,
   renameBook,
   saveRoutineCategories,
@@ -106,15 +109,42 @@ export default function BukuKasPage() {
         books.map(async (b) => {
           let totalSaldo = 0
           if (b.type === 'rutin') {
-            const [categories, checklists] = await Promise.all([
+            const [frequency, categories, sessions, checklists] = await Promise.all([
+              getRoutineFrequency(b.id),
               getRoutineCategories(b.id),
+              getRoutineSessions(b.id),
               getRoutineChecklists(b.id),
             ])
-            const amountByCategoryId = new Map(categories.map((c) => [c.id, c.amount]))
-            totalSaldo = checklists.reduce((acc, item) => {
-              if (!item.checked) return acc
-              return acc + (amountByCategoryId.get(item.categoryId) ?? 0)
-            }, 0)
+
+            if (frequency === 'bulanan') {
+              // Mode bulanan: pakai kategori global
+              const amountByCategoryId = new Map(categories.map((c) => [c.id, c.amount]))
+              totalSaldo = checklists.reduce((acc, item) => {
+                if (!item.checked || item.notPaid || item.transferred) return acc
+                const count = item.count ?? 1
+                const amount = amountByCategoryId.get(item.categoryId) ?? 0
+                return acc + (count * amount)
+              }, 0)
+            } else {
+              // Mode arisan/per sesi: pakai kategori dari masing-masing session
+              // Build map: categoryId -> amount dari semua session
+              const amountByCategoryId = new Map<string, number>()
+              for (const session of sessions) {
+                for (const cat of (session.categories ?? [])) {
+                  amountByCategoryId.set(cat.id, cat.amount)
+                }
+              }
+              totalSaldo = checklists.reduce((acc, item) => {
+                if (!item.checked || item.notPaid || item.transferred) return acc
+                const count = item.count ?? 1
+                const amount = amountByCategoryId.get(item.categoryId) ?? 0
+                return acc + (count * amount)
+              }, 0)
+            }
+          } else if (b.type === 'kolektif') {
+            const sessions = await getKolektifSessions(b.id)
+            const totals = await Promise.all(sessions.map(s => getKolektifConfig(s.id)))
+            totalSaldo = totals.reduce((sum, cfg) => sum + cfg.rows.reduce((s, r) => s + r.amount, 0), 0)
           } else {
             const tx = await getTransactions(b.id)
             totalSaldo = tx.reduce(
@@ -136,15 +166,17 @@ export default function BukuKasPage() {
     }
   }, [books])
 
-  // Redirect rutin books
+  // Redirect rutin/kolektif books
   useEffect(() => {
     if (currentBook?.type === 'rutin' && bookId) {
       navigate(`/buku-kas-rutin/${bookId}`, { replace: true })
+    } else if (currentBook?.type === 'kolektif' && bookId) {
+      navigate(`/buku-kas-kolektif/${bookId}`, { replace: true })
     }
   }, [currentBook, bookId, navigate])
 
   if (bookId) {
-    if (currentBook?.type === 'rutin') {
+    if (currentBook?.type === 'rutin' || currentBook?.type === 'kolektif') {
       return null
     }
 
@@ -335,22 +367,27 @@ export default function BukuKasPage() {
       await renameBook(editingBookId, name)
       if (editingBookType === 'rutin') {
         const freq: RoutineFrequency = editRoutineFrequency === 'arisan' ? 'arisan' : 'bulanan'
-        const members = editRoutineMembers
-          .map((m) => ({ ...m, name: m.name.trim() }))
-          .filter((m) => m.name)
-        const categories = editRoutineCategories
-          .map((c) => ({ ...c, name: c.name.trim(), amount: Number(c.amount) || 0 }))
-          .filter((c) => c.name && c.amount > 0)
         await saveRoutineFrequency(editingBookId, freq)
-        await saveRoutineMembers(editingBookId, members)
-        await saveRoutineCategories(editingBookId, categories)
-        const validMemberIds = new Set(members.map((m) => m.id))
-        const validCategoryIds = new Set(categories.map((c) => c.id))
-        const existingChecklists = await getRoutineChecklists(editingBookId)
-        const cleanedChecklists = existingChecklists.filter(
-          (c) => validMemberIds.has(c.memberId) && validCategoryIds.has(c.categoryId),
-        )
-        await saveRoutineChecklists(editingBookId, cleanedChecklists)
+
+        if (freq === 'bulanan') {
+          // Untuk bulanan: simpan members dan categories, lalu bersihkan checklists yang tidak valid
+          const members = editRoutineMembers
+            .map((m) => ({ ...m, name: m.name.trim() }))
+            .filter((m) => m.name)
+          const categories = editRoutineCategories
+            .map((c) => ({ ...c, name: c.name.trim(), amount: Number(c.amount) || 0 }))
+            .filter((c) => c.name && c.amount > 0)
+          await saveRoutineMembers(editingBookId, members)
+          await saveRoutineCategories(editingBookId, categories)
+          const validMemberIds = new Set(members.map((m) => m.id))
+          const validCategoryIds = new Set(categories.map((c) => c.id))
+          const existingChecklists = await getRoutineChecklists(editingBookId)
+          const cleanedChecklists = existingChecklists.filter(
+            (c) => validMemberIds.has(c.memberId) && validCategoryIds.has(c.categoryId),
+          )
+          await saveRoutineChecklists(editingBookId, cleanedChecklists)
+        }
+        // Untuk arisan: tidak overwrite members/categories/checklists — dikelola per sesi
       }
       await refreshBooks()
       setOpenEditBook(false)
@@ -592,25 +629,50 @@ export default function BukuKasPage() {
       <div className="flex flex-wrap gap-4">
         {books.map((b) => {
           const isRoutineBook = b.type === 'rutin'
-          const bookTypeLabel = b.type === 'rutin' ? 'Buku Kolektif' : 'Buku Transaksi'
-          const href = isRoutineBook ? `/buku-kas-rutin/${b.id}` : `/buku-kas/${b.id}`
+          const isKolektifBook = b.type === 'kolektif'
+          const bookTypeLabel = b.type === 'rutin' ? 'Buku Rutinan' : b.type === 'kolektif' ? 'Buku Kolektif' : 'Buku Transaksi'
+          const href = isRoutineBook ? `/buku-kas-rutin/${b.id}` : isKolektifBook ? `/buku-kas-kolektif/${b.id}` : `/buku-kas/${b.id}`
           const totalSaldo = bookStats[b.id] ?? 0
 
           return (
             <NavLink key={b.id} to={href} className="block w-[180px] shrink-0">
-              <div className="relative h-56 w-[180px] overflow-hidden rounded-xl border bg-white p-4 shadow-sm transition hover:shadow-md">
-                <div className="absolute inset-y-0 left-0 w-1.5 bg-slate-200" />
-                <div className="flex h-full flex-col justify-between pl-2">
-                  <div className="grid gap-1">
-                    <div className="line-clamp-2 text-sm font-semibold text-slate-900">
+              <div className="relative h-56 w-[180px] overflow-hidden border-r border-t border-b border-slate-300 transition hover:shadow-xl" style={{
+                background: 'linear-gradient(135deg, #f8f9fa 0%, #ffffff 100%)',
+                boxShadow: '-3px 0 8px rgba(0,0,0,0.15), 2px 2px 8px rgba(0,0,0,0.1)',
+                borderTopRightRadius: '8px',
+                borderBottomRightRadius: '8px',
+                borderTopLeftRadius: '4px',
+                borderBottomLeftRadius: '4px',
+              }}>
+                {/* Punggung buku (spine) - dipersempit */}
+                <div className="absolute inset-y-0 left-0 w-3 bg-gradient-to-br from-slate-600 via-slate-700 to-slate-800" style={{
+                  boxShadow: 'inset -3px 0 6px rgba(0,0,0,0.4), inset 0 0 20px rgba(0,0,0,0.2)',
+                  borderTopLeftRadius: '4px',
+                  borderBottomLeftRadius: '4px',
+                }} />
+                
+                {/* Label/Stiker untuk judul dan saldo */}
+                <div className="absolute left-5 top-3 right-6 border-2 border-slate-700 rounded-md bg-white p-2.5">
+                  <div className="grid gap-1.5">
+                    <div className="line-clamp-2 text-xs font-bold text-slate-900 leading-tight">
                       {b.name}
                     </div>
-                    <div className="text-xs text-slate-500">{bookTypeLabel}</div>
-                  </div>
-                  <div className="text-sm font-medium text-slate-900">
-                    {formatIDR(totalSaldo)}
+                    <div className="text-sm font-semibold text-slate-800 border-t border-slate-300 pt-1.5">
+                      {formatIDR(totalSaldo)}
+                    </div>
                   </div>
                 </div>
+                
+                {/* Tipe buku di bagian bawah */}
+                <div className="absolute bottom-4 left-5 right-4">
+                  <div className="text-xs font-medium text-slate-600 uppercase tracking-wide">{bookTypeLabel}</div>
+                </div>
+                
+                {/* Efek tekstur kertas halus */}
+                <div className="absolute inset-0 pointer-events-none" style={{
+                  background: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.01) 2px, rgba(0,0,0,0.01) 4px)',
+                  mixBlendMode: 'multiply'
+                }} />
               </div>
             </NavLink>
           )
@@ -660,7 +722,7 @@ export default function BukuKasPage() {
                     {b.name}
                   </div>
                   <div className="text-xs text-slate-500">
-                    {b.type === 'rutin' ? 'Buku Kolektif' : 'Buku Transaksi'}
+                    {b.type === 'rutin' ? 'Buku Rutinan' : b.type === 'kolektif' ? 'Buku Kolektif' : 'Buku Transaksi'}
                   </div>
                 </div>
                 <Button variant="secondary" onClick={() => startEditBook(b.id)}>
@@ -709,7 +771,8 @@ export default function BukuKasPage() {
               onChange={(e) => setNewBookType(e.target.value as BookType)}
             >
               <option value="biasa">Buku Transaksi</option>
-              <option value="rutin">Buku Kolektif</option>
+              <option value="rutin">Buku Rutinan</option>
+              <option value="kolektif">Buku Kolektif</option>
             </Select>
           </div>
           {newBookType === 'rutin' ? (

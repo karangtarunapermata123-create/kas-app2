@@ -57,7 +57,50 @@ export default function DashboardPage({ bookId, saldoHref, rekeningHref }: Props
     return { masuk, keluar, saldo: masuk - keluar }
   }, [transactions])
 
-  const recent = useMemo(() => transactions.slice(0, 8), [transactions])
+  const recent = useMemo(() => transactions.slice(0, 5), [transactions])
+
+  // Data untuk chart - 6 bulan terakhir
+  const chartData = useMemo(() => {
+    const monthlyData: Record<string, { masuk: number; keluar: number }> = {}
+    
+    // Get last 6 months
+    const now = new Date()
+    const months: string[] = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+      months.push(key)
+      monthlyData[key] = { masuk: 0, keluar: 0 }
+    }
+
+    // Aggregate transactions by month
+    transactions.forEach((t) => {
+      const monthKey = t.date.slice(0, 7) // YYYY-MM
+      if (monthlyData[monthKey]) {
+        if (t.type === 'masuk') {
+          monthlyData[monthKey].masuk += t.amount
+        } else {
+          monthlyData[monthKey].keluar += t.amount
+        }
+      }
+    })
+
+    // Convert to array with month labels
+    return months.map((key) => {
+      const [year, month] = key.split('-')
+      const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des']
+      return {
+        label: monthNames[parseInt(month) - 1],
+        masuk: monthlyData[key].masuk,
+        keluar: monthlyData[key].keluar,
+      }
+    })
+  }, [transactions])
+
+  const maxAmount = useMemo(() => {
+    const amounts = chartData.flatMap((d) => [d.masuk, d.keluar])
+    return Math.max(...amounts, 1)
+  }, [chartData])
 
   const saldoCard = (
     <Card title="Saldo Tunai">
@@ -119,6 +162,63 @@ export default function DashboardPage({ bookId, saldoHref, rekeningHref }: Props
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </Card>
+
+      <Card title="Grafik Transaksi 6 Bulan Terakhir">
+        {transactions.length === 0 ? (
+          <div className="text-sm text-slate-600">Belum ada data transaksi.</div>
+        ) : (
+          <div className="grid gap-4">
+            {/* Legend */}
+            <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded bg-emerald-500" />
+                <span className="text-slate-600">Masuk</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="h-3 w-3 rounded bg-rose-500" />
+                <span className="text-slate-600">Keluar</span>
+              </div>
+            </div>
+
+            {/* Chart */}
+            <div className="flex items-end justify-between gap-2 h-48">
+              {chartData.map((data, index) => (
+                <div key={index} className="flex-1 flex flex-col items-center gap-2">
+                  {/* Bars */}
+                  <div className="w-full flex items-end justify-center gap-1 h-40">
+                    {/* Bar Masuk */}
+                    <div className="relative flex-1 bg-emerald-500 rounded-t transition-all hover:bg-emerald-600 group" style={{
+                      height: `${(data.masuk / maxAmount) * 100}%`,
+                      minHeight: data.masuk > 0 ? '4px' : '0',
+                    }}>
+                      {/* Tooltip */}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block">
+                        <div className="bg-slate-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
+                          {formatIDR(data.masuk)}
+                        </div>
+                      </div>
+                    </div>
+                    {/* Bar Keluar */}
+                    <div className="relative flex-1 bg-rose-500 rounded-t transition-all hover:bg-rose-600 group" style={{
+                      height: `${(data.keluar / maxAmount) * 100}%`,
+                      minHeight: data.keluar > 0 ? '4px' : '0',
+                    }}>
+                      {/* Tooltip */}
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block">
+                        <div className="bg-slate-900 text-white text-xs rounded px-2 py-1 whitespace-nowrap">
+                          {formatIDR(data.keluar)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {/* Label */}
+                  <div className="text-xs text-slate-500 font-medium">{data.label}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </Card>

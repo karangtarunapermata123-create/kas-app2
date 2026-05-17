@@ -9,6 +9,9 @@ import type {
   RoutineChecklist,
   RoutineFrequency,
   RoutineSession,
+  KolektifConfig,
+  KolektifRow,
+  KolektifSession,
   Activity,
   ActivitySession,
   AttendanceRecord,
@@ -16,6 +19,86 @@ import type {
 import { uid } from './id'
 
 export const TRANSACTIONS_CHANGED_EVENT = 'kas:transactions:changed'
+
+// ─── Kolektif Book ────────────────────────────────────────────────────────────
+
+export async function getKolektifSessions(bookId: string): Promise<KolektifSession[]> {
+  const { data, error } = await supabase
+    .from('kolektif_sessions')
+    .select('*')
+    .eq('book_id', bookId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return (data ?? []).map(s => ({
+    id: s.id,
+    bookId: s.book_id,
+    name: s.name,
+    sortOrder: s.sort_order,
+  }))
+}
+
+export async function addKolektifSession(bookId: string, name: string): Promise<KolektifSession> {
+  const sessions = await getKolektifSessions(bookId)
+  const nextOrder = sessions.length > 0 ? Math.max(...sessions.map(s => s.sortOrder)) + 1 : 0
+  const session: KolektifSession = { id: uid('ks'), bookId, name: name.trim(), sortOrder: nextOrder }
+  const { error } = await supabase.from('kolektif_sessions').insert({
+    id: session.id, book_id: bookId, name: session.name, sort_order: nextOrder,
+  })
+  if (error) throw error
+  return session
+}
+
+export async function renameKolektifSession(sessionId: string, name: string): Promise<void> {
+  const { error } = await supabase.from('kolektif_sessions').update({ name: name.trim() }).eq('id', sessionId)
+  if (error) throw error
+}
+
+export async function deleteKolektifSession(sessionId: string): Promise<void> {
+  const { error } = await supabase.from('kolektif_sessions').delete().eq('id', sessionId)
+  if (error) throw error
+}
+
+export async function getKolektifConfig(sessionId: string): Promise<KolektifConfig> {
+  const [configRes, rowsRes] = await Promise.all([
+    supabase.from('kolektif_config').select('*').eq('session_id', sessionId).single(),
+    supabase.from('kolektif_rows').select('*').eq('session_id', sessionId)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+  ])
+  const headerLabel = configRes.data?.header_label ?? 'Nama'
+  const rows: KolektifRow[] = (rowsRes.data ?? []).map(r => ({ id: r.id, label: r.label, amount: r.amount }))
+  return { sessionId, headerLabel, rows }
+}
+
+export async function updateKolektifHeader(sessionId: string, headerLabel: string): Promise<void> {
+  const { error } = await supabase.from('kolektif_config').upsert({
+    session_id: sessionId,
+    header_label: headerLabel.trim() || 'Nama',
+  })
+  if (error) throw error
+}
+
+export async function addKolektifRow(sessionId: string, bookId: string, label: string, amount: number): Promise<void> {
+  const { data: existing } = await supabase.from('kolektif_rows').select('sort_order')
+    .eq('session_id', sessionId).order('sort_order', { ascending: false }).limit(1)
+  const nextOrder = (existing?.[0]?.sort_order ?? 0) + 1
+  const { error } = await supabase.from('kolektif_rows').insert({
+    id: uid('kr'), session_id: sessionId, book_id: bookId,
+    label: label.trim(), amount, sort_order: nextOrder,
+  })
+  if (error) throw error
+}
+
+export async function updateKolektifRow(rowId: string, label: string, amount: number): Promise<void> {
+  const { error } = await supabase.from('kolektif_rows').update({ label: label.trim(), amount }).eq('id', rowId)
+  if (error) throw error
+}
+
+export async function deleteKolektifRow(rowId: string): Promise<void> {
+  const { error } = await supabase.from('kolektif_rows').delete().eq('id', rowId)
+  if (error) throw error
+}
 
 // ─── Organization Name ────────────────────────────────────────────────────────
 // Tetap pakai localStorage karena ini hanya setting lokal UI
@@ -46,7 +129,7 @@ export async function saveBooks(books: Book[]): Promise<void> {
   if (error) throw error
 }
 
-export async function addBook(name: string, type: 'biasa' | 'rutin' = 'biasa'): Promise<Book> {
+export async function addBook(name: string, type: 'biasa' | 'rutin' | 'kolektif' = 'biasa'): Promise<Book> {
   const b: Book = { id: uid('book'), name: name.trim(), type }
   const { error } = await supabase.from('books').insert({ id: b.id, name: b.name, type: b.type })
   if (error) throw error
@@ -167,6 +250,7 @@ export async function getRoutineChecklists(bookId: string): Promise<RoutineCheck
     date: c.date ?? undefined,
     count: c.count ?? 1,
     notPaid: c.not_paid ?? false,
+    transferred: c.transferred ?? false,
   }))
 }
 
@@ -182,6 +266,7 @@ export async function saveRoutineChecklists(bookId: string, checklists: RoutineC
     date: c.date ?? null,
     count: c.count ?? 1,
     not_paid: c.notPaid ?? false,
+    transferred: c.transferred ?? false,
   }))
   const { error } = await supabase.from('routine_checklists').insert(rows)
   if (error) throw error
@@ -196,6 +281,7 @@ export async function toggleRoutineChecklist(
   date?: string,
   count?: number,
   notPaid?: boolean,
+  transferred?: boolean,
 ): Promise<void> {
   const { error } = await supabase
     .from('routine_checklists')
@@ -209,6 +295,7 @@ export async function toggleRoutineChecklist(
         date: date ?? null,
         count: count ?? 1,
         not_paid: notPaid ?? false,
+        transferred: transferred ?? false,
       },
       { onConflict: 'book_id,period_key,member_id,category_id' },
     )
@@ -229,6 +316,126 @@ export async function deleteRoutineChecklist(
     .eq('member_id', memberId)
     .eq('category_id', categoryId)
   if (error) throw error
+}
+
+export async function transferRoutineToTransaction(
+  routineBookId: string,
+  periodKey: string,
+  categoryId: string,
+  categoryName: string,
+  totalAmount: number,
+  targetBookId: string,
+  sessionName?: string,
+  routineBookName?: string,
+): Promise<void> {
+  // Create transaction in the target (biasa) book with today's date
+  const today = new Date()
+  const transactionDate = today.toISOString().split('T')[0] // Use today's date (YYYY-MM-DD)
+
+  // Build note based on period type
+  let periodLabel: string
+  if (sessionName) {
+    // Arisan/per sesi: periodKey = "ses_xxx-01" → putaran ke-1
+    const roundNumber = periodKey.split('-').pop() ?? '1'
+    periodLabel = `${sessionName} Putaran ${parseInt(roundNumber, 10)}`
+  } else {
+    // Bulanan: periodKey = "2025-01"
+    const [year, month] = periodKey.split('-')
+    periodLabel = `${month}/${year}`
+  }
+
+  const bookLabel = routineBookName ?? 'Buku Rutinan'
+
+  await addTransaction(targetBookId, {
+    date: transactionDate,
+    type: 'masuk',
+    categoryId: 'iuran',
+    amount: totalAmount,
+    note: `Transfer dari ${bookLabel} - ${categoryName} ${periodLabel} [${periodKey}|${categoryName}]`,
+    masukKeRekening: false,
+  })
+
+  // Mark all checklists for this period+category as transferred
+  console.log('Updating routine_checklists with:', {
+    routineBookId,
+    periodKey,
+    categoryId,
+  })
+  
+  const { data, error } = await supabase
+    .from('routine_checklists')
+    .update({ transferred: true })
+    .eq('book_id', routineBookId)
+    .eq('period_key', periodKey)
+    .eq('category_id', categoryId)
+    .eq('checked', true)
+    .eq('not_paid', false)
+    .select()
+
+  console.log('Update result:', { data, error })
+
+  if (error) {
+    console.error('Error updating routine_checklists:', error)
+    throw error
+  }
+  
+  if (!data || data.length === 0) {
+    console.warn('No rows were updated. Check if the data exists.')
+  }
+  
+  // Trigger refresh events
+  window.dispatchEvent(new CustomEvent(TRANSACTIONS_CHANGED_EVENT, { detail: { bookId: targetBookId } }))
+  window.dispatchEvent(new CustomEvent('storage'))
+}
+
+export async function reverseTransferFromTransaction(
+  transactionId: string,
+  transactionBookId: string,
+  routineBookId: string,
+  periodKey: string,
+  categoryId: string,
+): Promise<void> {
+  // Delete the transaction from the target (biasa) book
+  await deleteTransaction(transactionBookId, transactionId)
+
+  // Mark all checklists for this period+category as not transferred
+  const { error } = await supabase
+    .from('routine_checklists')
+    .update({ transferred: false })
+    .eq('book_id', routineBookId)
+    .eq('period_key', periodKey)
+    .eq('category_id', categoryId)
+    .eq('checked', true)
+    .eq('not_paid', false)
+
+  if (error) throw error
+  
+  // Trigger refresh events
+  window.dispatchEvent(new CustomEvent(TRANSACTIONS_CHANGED_EVENT, { detail: { bookId: transactionBookId } }))
+  window.dispatchEvent(new CustomEvent('storage'))
+}
+
+export async function getRoutineBooksForReverseTransfer(): Promise<Book[]> {
+  const allBooks = await getBooks()
+  return allBooks.filter(b => b.type === 'rutin')
+}
+
+export function parseTransferNote(note: string): { categoryName: string; periodKey: string } | null {
+  // Format baru: "Transfer dari {bookName} - {label} [{periodKey}|{categoryName}]"
+  const newMatch = note.match(/^Transfer dari .+ - .+ \[([^\|]+)\|(.+)\]$/)
+  if (newMatch) {
+    const [, periodKey, categoryName] = newMatch
+    return { categoryName: categoryName.trim(), periodKey: periodKey.trim() }
+  }
+
+  // Format lama (bulanan): "Transfer dari buku kolektif - {categoryName} {month}/{year}"
+  const oldMatch = note.match(/Transfer dari buku kolektif - (.+) (\d{2})\/(\d{4})/)
+  if (oldMatch) {
+    const [, categoryName, month, year] = oldMatch
+    return { categoryName: categoryName.trim(), periodKey: `${year}-${month}` }
+  }
+
+  return null
 }
 
 // ─── Routine Frequency ────────────────────────────────────────────────────────
@@ -412,6 +619,7 @@ export async function getTransactions(bookId: string): Promise<Transaction[]> {
     amount: t.amount,
     note: t.note,
     masukKeRekening: Boolean(t.masuk_ke_rekening),
+    attachmentUrl: t.attachment_url ?? undefined,
   }))
 }
 
@@ -430,6 +638,7 @@ export async function saveTransactions(bookId: string, transactions: Transaction
     amount: t.amount,
     note: t.note,
     masuk_ke_rekening: Boolean(t.masukKeRekening),
+    attachment_url: t.attachmentUrl ?? null,
   }))
   const { error } = await supabase.from('transactions').insert(rows)
   if (error) throw error
@@ -445,6 +654,7 @@ export async function addTransaction(
     amount: number
     note: string
     masukKeRekening?: boolean
+    attachmentUrl?: string
   },
 ): Promise<Transaction> {
   const t: Transaction = {
@@ -455,6 +665,7 @@ export async function addTransaction(
     amount: input.amount,
     note: input.note,
     masukKeRekening: Boolean(input.masukKeRekening),
+    attachmentUrl: input.attachmentUrl,
   }
   const { error } = await supabase.from('transactions').insert({
     id: t.id,
@@ -465,6 +676,7 @@ export async function addTransaction(
     amount: t.amount,
     note: t.note,
     masuk_ke_rekening: t.masukKeRekening,
+    attachment_url: t.attachmentUrl ?? null,
   })
   if (error) throw error
   window.dispatchEvent(new CustomEvent(TRANSACTIONS_CHANGED_EVENT, { detail: { bookId } }))
@@ -479,12 +691,39 @@ export async function updateTransaction(bookId: string, id: string, patch: Parti
   if (patch.amount !== undefined) update.amount = patch.amount
   if (patch.note !== undefined) update.note = patch.note
   if (patch.masukKeRekening !== undefined) update.masuk_ke_rekening = patch.masukKeRekening
+  if (patch.attachmentUrl !== undefined) update.attachment_url = patch.attachmentUrl ?? null
   const { error } = await supabase.from('transactions').update(update).eq('id', id).eq('book_id', bookId)
   if (error) throw error
   window.dispatchEvent(new CustomEvent(TRANSACTIONS_CHANGED_EVENT, { detail: { bookId } }))
 }
 
 export async function deleteTransaction(bookId: string, id: string): Promise<void> {
+  // Ambil data transaksi dulu untuk mendapatkan attachment_url
+  const { data: transaction } = await supabase
+    .from('transactions')
+    .select('attachment_url')
+    .eq('id', id)
+    .eq('book_id', bookId)
+    .single()
+  
+  // Hapus file dari storage jika ada
+  if (transaction?.attachment_url) {
+    try {
+      const url = new URL(transaction.attachment_url)
+      const pathParts = url.pathname.split('/transaction-attachments/')
+      if (pathParts.length >= 2) {
+        const filePath = pathParts[1]
+        await supabase.storage
+          .from('transaction-attachments')
+          .remove([filePath])
+      }
+    } catch (error) {
+      console.error('Error deleting attachment file:', error)
+      // Lanjutkan hapus transaksi meskipun gagal hapus file
+    }
+  }
+  
+  // Hapus transaksi dari database
   const { error } = await supabase.from('transactions').delete().eq('id', id).eq('book_id', bookId)
   if (error) throw error
   window.dispatchEvent(new CustomEvent(TRANSACTIONS_CHANGED_EVENT, { detail: { bookId } }))

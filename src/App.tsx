@@ -3,8 +3,11 @@ import { useState, useEffect } from 'react'
 import AbsensiPage from './pages/AbsensiPage'
 import BukuKasPage from './pages/BukuKasPage'
 import PengaturanPage from './pages/PengaturanPage'
+import KelolaUserPage from './pages/KelolaUserPage'
 import ProfilPage from './pages/ProfilPage'
 import RoutineBookPage from './pages/RoutineBookPage'
+import KolektifPage from './pages/KolektifPage'
+import KolektifSessionPage from './pages/KolektifSessionPage'
 import LoginPage from './pages/LoginPage'
 import RequireAuth from './components/RequireAuth'
 import { getActivities, getBooks, getSessionsByActivity } from './lib/store'
@@ -105,6 +108,14 @@ function AppShell() {
         const books = await getBooks()
         title = books.find((b) => b.id === parts[1])?.name ?? 'Buku kas rutin'
         backTo = '/buku-kas'
+      } else if (parts[0] === 'buku-kas-kolektif' && parts[1] && parts[2] === 'sesi' && parts[3]) {
+        const books = await getBooks()
+        title = books.find((b) => b.id === parts[1])?.name ?? 'Buku Kolektif'
+        backTo = `/buku-kas-kolektif/${parts[1]}`
+      } else if (parts[0] === 'buku-kas-kolektif' && parts[1]) {
+        const books = await getBooks()
+        title = books.find((b) => b.id === parts[1])?.name ?? 'Buku Kolektif'
+        backTo = '/buku-kas'
       } else if (parts[0] === 'buku-kas') {
         title = 'Buku kas'
       } else if (parts[0] === 'absensi' && parts[1] && parts[2] === 'sesi' && parts[3]) {
@@ -119,6 +130,9 @@ function AppShell() {
         title = 'Absensi'
       } else if (parts[0] === 'pengaturan') {
         title = 'Pengaturan'
+      } else if (parts[0] === 'kelola-user') {
+        title = 'Kelola User'
+        backTo = '/pengaturan'
       } else if (parts[0] === 'profil') {
         title = 'Profil'
       }
@@ -254,10 +268,13 @@ function AppShell() {
               <Route path="/buku-kas/:bookId/transaksi" element={<BukuKasPage />} />
               <Route path="/buku-kas/:bookId/transaksi-rekening" element={<BukuKasPage />} />
               <Route path="/buku-kas-rutin/:bookId" element={<RoutineBookPage />} />
+              <Route path="/buku-kas-kolektif/:bookId" element={<KolektifPage />} />
+              <Route path="/buku-kas-kolektif/:bookId/sesi/:sessionId" element={<KolektifSessionPage />} />
               <Route path="/absensi" element={<AbsensiPage />} />
               <Route path="/absensi/:activityId" element={<AbsensiPage />} />
               <Route path="/absensi/:activityId/sesi/:sessionId" element={<AbsensiPage />} />
               <Route path="/pengaturan" element={<PengaturanPage />} />
+              <Route path="/kelola-user" element={<KelolaUserPage />} />
               <Route path="/profil" element={<ProfilPage />} />
             </Routes>
           </main>

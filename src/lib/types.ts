@@ -1,11 +1,30 @@
 export type TxType = 'masuk' | 'keluar'
 
-export type BookType = 'biasa' | 'rutin'
+export type BookType = 'biasa' | 'rutin' | 'kolektif'
 
 export type Book = {
   id: string
   name: string
   type: BookType
+}
+
+export type KolektifSession = {
+  id: string
+  bookId: string
+  name: string
+  sortOrder: number
+}
+
+export type KolektifRow = {
+  id: string
+  label: string
+  amount: number
+}
+
+export type KolektifConfig = {
+  sessionId: string
+  headerLabel: string
+  rows: KolektifRow[]
 }
 
 export type Category = {
@@ -21,6 +40,7 @@ export type Transaction = {
   amount: number
   note: string
   masukKeRekening?: boolean
+  attachmentUrl?: string // URL lampiran file dari Supabase Storage
 }
 
 export type RoutineMember = {
@@ -42,6 +62,7 @@ export type RoutineChecklist = {
   date?: string
   count?: number // jumlah setoran (default 1)
   notPaid?: boolean // flag untuk tidak setor (tampilkan X merah)
+  transferred?: boolean // flag untuk sudah ditransfer ke buku transaksi
 }
 
 export type RoutineSession = {

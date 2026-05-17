@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import basicSsl from '@vitejs/plugin-basic-ssl'
+import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig(({ command, mode }) => {
   // Use HTTPS only when explicitly requested
@@ -9,7 +10,46 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [
       react(),
-      ...(useHttps ? [basicSsl()] : [])
+      ...(useHttps ? [basicSsl()] : []),
+      VitePWA({
+        registerType: 'autoUpdate',
+        includeAssets: ['icons/icon-192.svg'],
+        manifest: {
+          name: 'Kas Pemuda',
+          short_name: 'Kas',
+          description: 'Aplikasi pencatatan kas pemuda',
+          theme_color: '#1e293b',
+          background_color: '#f8fafc',
+          display: 'standalone',
+          orientation: 'portrait-primary',
+          start_url: '/',
+          icons: [
+            {
+              src: 'icons/icon-192.svg',
+              sizes: '192x192',
+              type: 'image/svg+xml',
+              purpose: 'any maskable',
+            },
+          ],
+        },
+        workbox: {
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/.*\/rest\/v1\/.*/i,
+              handler: 'NetworkFirst',
+              options: {
+                cacheName: 'supabase-api-cache',
+                expiration: {
+                  maxEntries: 50,
+                  maxAgeSeconds: 60 * 60 * 24,
+                },
+                networkTimeoutSeconds: 10,
+              },
+            },
+          ],
+        },
+      }),
     ],
     server: {
       host: true,

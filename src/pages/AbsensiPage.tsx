@@ -693,28 +693,30 @@ export default function AbsensiPage() {
     return (
       <div className="grid gap-4">
         {/* Info meta */}
-        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-          <span className={`rounded-full px-2 py-0.5 font-medium ${isRutin ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400' : 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'}`}>
-            {isRutin ? 'Rutin' : 'Sekali'}
-          </span>
-          {isRutin && selectedActivity.frequency && (
-            <>
-              <span>·</span>
-              <span className="capitalize">{selectedActivity.frequency}</span>
-            </>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+            <span className={`rounded-full px-2 py-0.5 font-medium ${isRutin ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400' : 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'}`}>
+              {isRutin ? 'Rutin' : 'Sekali'}
+            </span>
+            {isRutin && selectedActivity.frequency && (
+              <>
+                <span>·</span>
+                <span className="capitalize">{selectedActivity.frequency}</span>
+              </>
+            )}
+            <span>·</span>
+            <span>{formatDate(selectedActivity.date)}</span>
+          </div>
+          {!isRutin && userCanEdit && (
+            <Button onClick={handleShowQR}>
+              🔲 Tampilkan QR
+            </Button>
           )}
-          <span>·</span>
-          <span>{formatDate(selectedActivity.date)}</span>
         </div>
 
         {isRutin ? (
           /* ── Kegiatan rutin: tampilkan tabel kehadiran semua sesi ── */
           <>
-            {/* Header - RESPONSIVE */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Rekap Kehadiran</h2>
-            </div>
-
             {sessions.length === 0 ? (
               <Card title="Sesi">
                 <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
@@ -961,15 +963,6 @@ export default function AbsensiPage() {
         ) : (
           /* ── Kegiatan sekali: langsung tampilkan absensi ── */
           <>
-            {/* Tombol Tampilkan QR untuk admin */}
-            {userCanEdit && (
-              <div className="flex justify-end">
-                <Button onClick={handleShowQR}>
-                  🔲 Tampilkan QR
-                </Button>
-              </div>
-            )}
-
             <AttendanceTable
               allProfiles={allProfiles}
               records={records}

@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { NavLink, useParams } from 'react-router-dom'
+import { NavLink, useParams, useNavigate } from 'react-router-dom'
 import Card from '../components/Card'
 import Select from '../components/Select'
 import Button from '../components/Button'
 import Input from '../components/Input'
 import Modal from '../components/Modal'
+import SuccessModal from '../components/SuccessModal'
 import { useAuth, canEditTransactions } from '../lib/auth'
 import {
   addRoutineSession,
@@ -19,6 +20,7 @@ import {
   renameRoutineSession,
   updateRoutineSession,
   toggleRoutineChecklist,
+  transferRoutineToTransaction,
 } from '../lib/store'
 import type { Book, RoutineCategory, RoutineChecklist, RoutineFrequency, RoutineMember, RoutineSession } from '../lib/types'
 import type { Profile } from '../lib/auth'
@@ -35,6 +37,7 @@ const MONTH_NAMES = [
 export default function RoutineBookPage() {
   const { bookId } = useParams<{ bookId: string }>()
   const { profile } = useAuth()
+  const navigate = useNavigate()
   const userCanEdit = canEditTransactions(profile?.role)
   
   if (!bookId) return null
@@ -123,6 +126,30 @@ export default function RoutineBookPage() {
   const [selectedSessionCategoryIds, setSelectedSessionCategoryIds] = useState<Set<string>>(new Set())
   const [newSessionCategoryName, setNewSessionCategoryName] = useState('')
   const [newSessionCategoryAmount, setNewSessionCategoryAmount] = useState('')
+  
+  // State untuk modal detail laporan
+  const [openDetailModal, setOpenDetailModal] = useState(false)
+  
+  // State untuk modal transfer
+  const [openTransferModal, setOpenTransferModal] = useState(false)
+  const [transferData, setTransferData] = useState<{
+    monthIndex: number
+    categoryId: string
+    categoryName: string
+    amount: number
+    periodKey: string
+  } | null>(null)
+  const [availableTargetBooks, setAvailableTargetBooks] = useState<Book[]>([])
+  const [selectedTargetBookId, setSelectedTargetBookId] = useState<string>('')
+
+  // State untuk modal success transfer
+  const [openSuccessModal, setOpenSuccessModal] = useState(false)
+  const [successData, setSuccessData] = useState<{
+    categoryName: string
+    amount: number
+    targetBookName: string
+    periodKey: string
+  } | null>(null)
 
   const refreshData = async () => {
     const [books, fetchedMembers, fetchedCategories, fetchedChecklists, fetchedSessions, fetchedFrequency] =
@@ -174,9 +201,15 @@ export default function RoutineBookPage() {
   const handleCheckboxClick = (memberId: string, categoryId: string, periodKey: string) => {
     if (!userCanEdit) return // Member tidak bisa edit
     
+    // Cek apakah sudah ditransfer
+    if (isTransferred(periodKey, categoryId)) {
+      alert('Data ini sudah ditransfer ke buku transaksi dan tidak bisa diubah')
+      return
+    }
+    
     const checklist = getChecklistStatus(memberId, categoryId, periodKey)
-    const member = members.find(m => m.id === memberId)
-    const category = categories.find(c => c.id === categoryId)
+    const member = displayMembers.find(m => m.id === memberId)
+    const category = displayCategories.find(c => c.id === categoryId)
     
     const currentCount = checklist?.count ?? 0
     
@@ -188,7 +221,7 @@ export default function RoutineBookPage() {
       memberName: member?.name ?? '',
       categoryName: category?.name ?? '',
     })
-    setTempCount(currentCount)
+    setTempCount(currentCount === 0 ? 1 : currentCount)
     setCountModalOpen(true)
   }
 
@@ -404,9 +437,9 @@ export default function RoutineBookPage() {
           const periodKey =
             frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
           const checklist = getChecklistStatus(member.id, category.id, periodKey)
-          if (checklist?.checked && !checklist.notPaid) {
-            const count = checklist.count ?? 1
-            total += count
+          // Hanya hitung jumlah setoran (count), tidak termasuk not_paid dan transferred
+          if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
+            total += checklist.count ?? 1
           }
         }
       }
@@ -423,9 +456,9 @@ export default function RoutineBookPage() {
           const periodKey =
             frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
           const checklist = getChecklistStatus(member.id, category.id, periodKey)
-          if (checklist?.checked && !checklist.notPaid) {
-            const count = checklist.count ?? 1
-            checkCount += count
+          // Hanya hitung jumlah setoran (count), tidak termasuk not_paid dan transferred
+          if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
+            checkCount += checklist.count ?? 1
           }
         }
         totalsMap.set(`${member.id}:${category.id}`, checkCount)
@@ -438,21 +471,21 @@ export default function RoutineBookPage() {
     const totalsArr = new Array(periodCount).fill(0)
     for (let p = 0; p < periodCount; p++) {
       let t = 0
-      for (const member of members) {
-        for (const category of categories) {
+      for (const member of displayMembers) {
+        for (const category of displayCategories) {
           const periodKey =
             frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
           const checklist = getChecklistStatus(member.id, category.id, periodKey)
-          if (checklist?.checked && !checklist.notPaid) {
-            const count = checklist.count ?? 1
-            t += count
+          // Hanya hitung jumlah setoran (count), tidak termasuk not_paid dan transferred
+          if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
+            t += checklist.count ?? 1
           }
         }
       }
       totalsArr[p] = t
     }
     return totalsArr
-  }, [members, categories, checklists, selectedYear, frequency, sessions, selectedSessionId])
+  }, [displayMembers, displayCategories, checklists, selectedYear, frequency, sessions, selectedSessionId])
 
   const years = useMemo(() => {
     const current = new Date().getFullYear()
@@ -461,17 +494,134 @@ export default function RoutineBookPage() {
     return ys
   }, [])
 
+  const handleCellClick = async (periodIndex: number, categoryId: string, amount: number) => {
+    if (amount === 0) return // Tidak ada yang bisa ditransfer
+    
+    const category = displayCategories.find(c => c.id === categoryId)
+    if (!category) return
+    
+    const periodKey = frequency === 'bulanan'
+      ? getPeriodKey(periodIndex)
+      : getArisanPeriodKey(periodIndex)
+    
+    // Cek apakah sudah ditransfer
+    const isAlreadyTransferred = checklists.some(
+      c => c.periodKey === periodKey && 
+           c.categoryId === categoryId && 
+           c.transferred === true
+    )
+    
+    if (isAlreadyTransferred) {
+      alert('Data ini sudah ditransfer ke buku transaksi')
+      return
+    }
+    
+    // Load buku transaksi (biasa) yang tersedia
+    const allBooks = await getBooks()
+    const bisaBooks = allBooks.filter(b => b.type === 'biasa')
+    setAvailableTargetBooks(bisaBooks)
+    setSelectedTargetBookId(bisaBooks[0]?.id ?? '')
+    
+    setTransferData({
+      monthIndex: periodIndex,
+      categoryId,
+      categoryName: category.name,
+      amount,
+      periodKey
+    })
+
+    // Tutup modal detail dulu, lalu buka modal transfer
+    setOpenDetailModal(false)
+    setTimeout(() => setOpenTransferModal(true), 200)
+  }
+
+  const handleTransfer = async () => {
+    if (!transferData) return
+    if (!selectedTargetBookId) {
+      alert('Pilih buku transaksi tujuan terlebih dahulu')
+      return
+    }
+    
+    const targetBook = availableTargetBooks.find(b => b.id === selectedTargetBookId)
+    
+    try {
+      await transferRoutineToTransaction(
+        safeBookId,
+        transferData.periodKey,
+        transferData.categoryId,
+        transferData.categoryName,
+        transferData.amount,
+        selectedTargetBookId,
+        frequency === 'arisan' ? (sessions.find(s => s.id === selectedSessionId)?.name) : undefined,
+        book?.name,
+      )
+      
+      await refreshData()
+      setOpenTransferModal(false)
+      
+      // Set data untuk success modal
+      setSuccessData({
+        categoryName: transferData.categoryName,
+        amount: transferData.amount,
+        targetBookName: targetBook?.name || 'Buku Transaksi',
+        periodKey: transferData.periodKey
+      })
+      
+      setTransferData(null)
+      
+      // Tampilkan success modal
+      setOpenSuccessModal(true)
+      
+    } catch (error) {
+      console.error('Error transferring:', error)
+      alert('Gagal mentransfer data')
+    }
+  }
+
+  const handleSuccessModalClose = () => {
+    setOpenSuccessModal(false)
+    setSuccessData(null)
+    // Buka kembali modal detail supaya user bisa lihat status terbaru
+    setTimeout(() => setOpenDetailModal(true), 200)
+  }
+
+  const handleViewTransactions = () => {
+    if (!successData) return
+    setOpenSuccessModal(false)
+    setSuccessData(null)
+    // Navigate ke halaman transaksi dengan bulan sekarang menggunakan React Router
+    const today = new Date()
+    const currentMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    
+    navigate(`/buku-kas/${selectedTargetBookId}/transaksi`, {
+      state: { selectedMonth: currentMonth }
+    })
+  }
+
+  const isTransferred = (periodKey: string, categoryId: string) => {
+    return checklists.some(
+      c => c.periodKey === periodKey && 
+           c.categoryId === categoryId && 
+           c.transferred === true
+    )
+  }
+
   return (
     <div className="grid gap-4">
       {frequency === 'bulanan' ? (
-        <div className="max-w-[140px]">
-          <Select value={String(selectedYear)} onChange={(e) => setSelectedYear(Number(e.target.value))}>
-            {years.map((y) => (
-              <option key={y} value={String(y)}>
-                {y}
-              </option>
-            ))}
-          </Select>
+        <div className="flex items-center gap-2">
+          <div className="max-w-[140px]">
+            <Select value={String(selectedYear)} onChange={(e) => setSelectedYear(Number(e.target.value))}>
+              {years.map((y) => (
+                <option key={y} value={String(y)}>
+                  {y}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Button variant="secondary" onClick={() => setOpenDetailModal(true)}>
+            Lihat Detail
+          </Button>
         </div>
       ) : (
         <div className="flex items-center gap-2">
@@ -483,6 +633,9 @@ export default function RoutineBookPage() {
             {sessions.find((s) => s.id === selectedSessionId)?.name ?? 'Pilih sesi'}
             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
+          <Button variant="secondary" onClick={() => setOpenDetailModal(true)}>
+            Lihat Detail
+          </Button>
         </div>
       )}
 
@@ -613,6 +766,7 @@ export default function RoutineBookPage() {
                               const checked = checklist?.checked ?? false
                               const count = checklist?.count ?? 1
                               const isNotPaid = checklist?.notPaid ?? false
+                              const transferred = isTransferred(periodKey, category.id)
                               
                               return (
                                 <td 
@@ -623,20 +777,37 @@ export default function RoutineBookPage() {
                                     <button
                                       type="button"
                                       onClick={() => handleCheckboxClick(member.id, category.id, periodKey)}
-                                      disabled={!userCanEdit}
+                                      disabled={!userCanEdit || transferred}
                                       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
-                                        !userCanEdit
+                                        !userCanEdit || transferred
                                           ? 'cursor-not-allowed opacity-60'
                                           : ''
                                       } ${
-                                        isNotPaid
+                                        transferred
+                                          ? 'border-green-600 bg-green-600 text-white'
+                                          : isNotPaid
                                           ? 'border-rose-600 bg-rose-600 text-white'
                                           : checked
                                           ? 'border-slate-900 bg-slate-900 text-white'
                                           : 'border-slate-300 bg-white hover:border-slate-400'
                                       }`}
+                                      title={transferred ? 'Sudah ditransfer ke buku transaksi' : ''}
                                     >
-                                      {isNotPaid ? (
+                                      {transferred ? (
+                                        <svg
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          className="h-3 w-3"
+                                        >
+                                          <path d="M7 17L17 7" />
+                                          <path d="M17 17H7V7" />
+                                        </svg>
+                                      ) : isNotPaid ? (
                                         <svg
                                           xmlns="http://www.w3.org/2000/svg"
                                           viewBox="0 0 24 24"
@@ -679,6 +850,7 @@ export default function RoutineBookPage() {
                               const checked = checklist?.checked ?? false
                               const count = checklist?.count ?? 1
                               const isNotPaid = checklist?.notPaid ?? false
+                              const transferred = isTransferred(periodKey, category.id)
                               
                               return (
                                 <td 
@@ -689,20 +861,37 @@ export default function RoutineBookPage() {
                                     <button
                                       type="button"
                                       onClick={() => handleCheckboxClick(member.id, category.id, periodKey)}
-                                      disabled={!userCanEdit}
+                                      disabled={!userCanEdit || transferred}
                                       className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
-                                        !userCanEdit
+                                        !userCanEdit || transferred
                                           ? 'cursor-not-allowed opacity-60'
                                           : ''
                                       } ${
-                                        isNotPaid
+                                        transferred
+                                          ? 'border-green-600 bg-green-600 text-white'
+                                          : isNotPaid
                                           ? 'border-rose-600 bg-rose-600 text-white'
                                           : checked
                                           ? 'border-slate-900 bg-slate-900 text-white'
                                           : 'border-slate-300 bg-white hover:border-slate-400'
                                       }`}
+                                      title={transferred ? 'Sudah ditransfer ke buku transaksi' : ''}
                                     >
-                                      {isNotPaid ? (
+                                      {transferred ? (
+                                        <svg
+                                          xmlns="http://www.w3.org/2000/svg"
+                                          viewBox="0 0 24 24"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="2"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                          className="h-3 w-3"
+                                        >
+                                          <path d="M7 17L17 7" />
+                                          <path d="M17 17H7V7" />
+                                        </svg>
+                                      ) : isNotPaid ? (
                                         <svg
                                           xmlns="http://www.w3.org/2000/svg"
                                           viewBox="0 0 24 24"
@@ -897,85 +1086,74 @@ export default function RoutineBookPage() {
 
       <Modal open={countModalOpen} title="Atur Jumlah Setoran" onClose={closeCountModal}>
         {countModalData && (
-          <div className="grid gap-4">
-            <div className="rounded-lg border bg-slate-50 p-3">
-              <div className="mb-1 text-xs font-medium text-slate-500">Anggota</div>
-              <div className="text-sm font-semibold text-slate-900">{countModalData.memberName}</div>
-              <div className="mt-2 mb-1 text-xs font-medium text-slate-500">Kategori</div>
-              <div className="text-sm font-semibold text-slate-900">{countModalData.categoryName}</div>
+          <div className="grid gap-5">
+
+            {/* Info anggota & kategori */}
+            <div className="flex items-center gap-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 px-4 py-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-base">
+                {countModalData.memberName.charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white truncate">{countModalData.memberName}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{countModalData.categoryName}</div>
+              </div>
             </div>
 
-            <div className="flex items-center justify-center gap-4">
+            {/* Counter */}
+            <div className="flex items-center justify-center gap-6">
               <button
                 type="button"
                 onClick={() => setTempCount(Math.max(0, tempCount - 1))}
-                className="flex h-12 w-12 items-center justify-center rounded-lg border-2 border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100"
+                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-95 transition-all"
                 aria-label="Kurangi"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-6 w-6"
-                >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
                   <path d="M5 12h14" />
                 </svg>
               </button>
 
-              <div className="flex flex-col items-center">
-                <div className="text-5xl font-bold text-slate-900">{tempCount}</div>
-                <div className="mt-1 text-sm text-slate-500">kali setoran</div>
+              <div className="flex flex-col items-center gap-0.5">
+                <div className="text-6xl font-bold tabular-nums text-slate-900 dark:text-white leading-none">{tempCount}</div>
+                <div className="text-xs text-slate-400 dark:text-slate-500 mt-1">kali setoran</div>
               </div>
 
               <button
                 type="button"
                 onClick={() => setTempCount(tempCount + 1)}
-                className="flex h-12 w-12 items-center justify-center rounded-lg border-2 border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50 active:bg-slate-100"
+                className="flex h-14 w-14 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 active:scale-95 transition-all"
                 aria-label="Tambah"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-6 w-6"
-                >
-                  <path d="M12 5v14" />
-                  <path d="M5 12h14" />
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
+                  <path d="M12 5v14" /><path d="M5 12h14" />
                 </svg>
               </button>
             </div>
 
+            {/* Divider */}
+            <div className="border-t border-slate-100 dark:border-slate-700" />
+
+            {/* Action buttons */}
             <div className="grid grid-cols-2 gap-2">
-              <Button 
-                variant="danger" 
-                onClick={handleNotPaid}
-              >
+              <Button variant="danger" onClick={handleNotPaid}>
                 Tidak Setor
               </Button>
-              <Button 
-                variant="secondary"
+              <button
+                type="button"
                 onClick={handleDelete}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                  <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                </svg>
                 Hapus
-              </Button>
+              </button>
             </div>
 
             <div className="flex justify-end gap-2">
-              <Button variant="secondary" onClick={closeCountModal}>
-                Batal
-              </Button>
-              <Button onClick={handleSave}>
-                Simpan
-              </Button>
+              <Button variant="secondary" onClick={closeCountModal}>Batal</Button>
+              <Button onClick={handleSave}>Simpan</Button>
             </div>
+
           </div>
         )}
       </Modal>
@@ -1106,6 +1284,291 @@ export default function RoutineBookPage() {
           </div>
         </div>
       </Modal>
+
+      <Modal
+        open={openDetailModal}
+        title={frequency === 'bulanan' ? `Detail Laporan Tahun ${selectedYear}` : `Detail Laporan ${sessions.find(s => s.id === selectedSessionId)?.name ?? 'Sesi'}`}
+        onClose={() => setOpenDetailModal(false)}
+      >
+        {/* Summary card */}
+        {(() => {
+          let totalSaldo = 0
+          let totalTransferred = 0
+          for (let p = 0; p < periodCount; p++) {
+            const periodKey = frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
+            displayCategories.forEach((category) => {
+              displayMembers.forEach((member) => {
+                const checklist = getChecklistStatus(member.id, category.id, periodKey)
+                if (checklist?.checked && !checklist.notPaid) {
+                  const amount = (checklist.count ?? 1) * category.amount
+                  if (checklist.transferred) {
+                    totalTransferred += amount
+                  } else {
+                    totalSaldo += amount
+                  }
+                }
+              })
+            })
+          }
+          return (
+            <div className="mb-4 grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Total Saldo</div>
+                <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">{formatIDR(totalSaldo)}</div>
+              </div>
+              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">Sudah Ditransfer</div>
+                <div className="text-base font-semibold text-blue-600 dark:text-blue-400">{formatIDR(totalTransferred)}</div>
+              </div>
+            </div>
+          )
+        })()}
+        <div className="mb-3 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5 shrink-0">
+            <path d="M15 15l-2 5L9 9l11 4-5 2z"/>
+          </svg>
+          Klik cell untuk transfer ke buku transaksi
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm" style={{ tableLayout: 'fixed', minWidth: '600px' }}>
+            <colgroup>
+              <col style={{ width: '100px' }} />
+              {displayCategories.map((category) => (
+                <col key={category.id} style={{ width: '140px' }} />
+              ))}
+              <col style={{ width: '140px' }} />
+            </colgroup>
+            <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+              <tr>
+                <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3">
+                  {frequency === 'bulanan' ? 'Bulan' : 'Putaran'}
+                </th>
+                  {displayCategories.map((category) => (
+                    <th
+                      key={category.id}
+                      className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right"
+                    >
+                      {category.name}
+                    </th>
+                  ))}
+                  <th className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right font-semibold">
+                    Total
+                  </th>
+                </tr>
+            </thead>
+            <tbody>
+              {(frequency === 'bulanan' ? MONTH_NAMES : Array.from({ length: displayMembers.length }, (_, i) => `Putaran ${i + 1}`)).map((periodName, periodIndex) => {
+                const periodKey = frequency === 'bulanan' ? getPeriodKey(periodIndex) : getArisanPeriodKey(periodIndex)
+                const categoryAmounts: Record<string, number> = {}
+                const categoryAmountsAll: Record<string, number> = {} // Untuk tampilan (termasuk transferred)
+                let periodTotal = 0
+
+                // Calculate amounts for each category in this period
+                displayCategories.forEach((category) => {
+                  let categoryAmount = 0 // Untuk total (tidak termasuk transferred)
+                  let categoryAmountAll = 0 // Untuk tampilan (termasuk transferred)
+                  
+                  displayMembers.forEach((member) => {
+                    const checklist = getChecklistStatus(member.id, category.id, periodKey)
+                    if (checklist?.checked && !checklist.notPaid) {
+                      const count = checklist.count ?? 1
+                      const amount = count * category.amount
+                      
+                      // Untuk tampilan: hitung semua (termasuk transferred)
+                      categoryAmountAll += amount
+                      
+                      // Untuk total: hanya yang belum ditransfer
+                      if (!checklist.transferred) {
+                        categoryAmount += amount
+                      }
+                    }
+                  })
+                  
+                  categoryAmounts[category.id] = categoryAmount
+                  categoryAmountsAll[category.id] = categoryAmountAll
+                  periodTotal += categoryAmount // Total hanya yang belum ditransfer
+                })
+
+                return (
+                  <tr key={periodIndex} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                    <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 font-medium text-slate-900 dark:text-white">
+                      {periodName}
+                    </td>
+                    {displayCategories.map((category) => {
+                      const amount = categoryAmounts[category.id] || 0 // Untuk transfer (belum ditransfer)
+                      const displayAmount = categoryAmountsAll[category.id] || 0 // Untuk tampilan (semua)
+                      const transferred = isTransferred(periodKey, category.id)
+                      
+                      return (
+                        <td
+                          key={category.id}
+                          onClick={() => handleCellClick(periodIndex, category.id, amount)}
+                          className={`border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right ${
+                            amount > 0 && !transferred 
+                              ? 'cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-700 dark:text-blue-400' 
+                              : transferred
+                              ? 'text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20'
+                              : 'text-slate-700 dark:text-slate-300'
+                          }`}
+                          title={
+                            transferred 
+                              ? 'Sudah ditransfer ke buku transaksi' 
+                              : amount > 0 
+                              ? 'Klik untuk transfer ke buku transaksi' 
+                              : ''
+                          }
+                        >
+                          <div className="flex items-center justify-end gap-1">
+                            {formatIDR(displayAmount)}
+                            {transferred && (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4 text-green-600"
+                              >
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </div>
+                        </td>
+                      )
+                    })}
+                    <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-semibold text-emerald-700 dark:text-emerald-400">
+                      {formatIDR(periodTotal)}
+                    </td>
+                  </tr>
+                )
+              })}
+              <tr className="bg-slate-50 dark:bg-slate-900 font-semibold">
+                <td className="sticky left-0 z-10 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-white">
+                  Total
+                </td>
+                {displayCategories.map((category) => {
+                  let categoryTotal = 0
+                  for (let p = 0; p < periodCount; p++) {
+                    const periodKey = frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
+                    displayMembers.forEach((member) => {
+                      const checklist = getChecklistStatus(member.id, category.id, periodKey)
+                      // Hanya hitung jika checked, tidak not_paid, dan belum ditransfer
+                      if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
+                        const count = checklist.count ?? 1
+                        categoryTotal += count * category.amount
+                      }
+                    })
+                  }
+                  return (
+                    <td
+                      key={category.id}
+                      className="border-t-2 border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400"
+                    >
+                      {formatIDR(categoryTotal)}
+                    </td>
+                  )
+                })}
+                <td className="border-t-2 border-slate-200 dark:border-slate-700 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400">
+                  {formatIDR(
+                    displayCategories.reduce((sum, category) => {
+                      let categoryTotal = 0
+                      for (let p = 0; p < periodCount; p++) {
+                        const periodKey = frequency === 'bulanan' ? getPeriodKey(p) : getArisanPeriodKey(p)
+                        displayMembers.forEach((member) => {
+                          const checklist = getChecklistStatus(member.id, category.id, periodKey)
+                          // Hanya hitung jika checked, tidak not_paid, dan belum ditransfer
+                          if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
+                            const count = checklist.count ?? 1
+                            categoryTotal += count * category.amount
+                          }
+                        })
+                      }
+                      return sum + categoryTotal
+                    }, 0)
+                  )}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openTransferModal}
+        title="Konfirmasi Transfer"
+        onClose={() => {
+          setOpenTransferModal(false)
+          setTimeout(() => setOpenDetailModal(true), 200)
+        }}
+      >
+        {transferData && (
+          <div className="space-y-4">
+            <div className="rounded-lg border bg-slate-50 dark:bg-slate-800 p-4">
+              <div className="mb-2 text-sm font-medium text-slate-600 dark:text-slate-400">
+                Detail Transfer
+              </div>
+              <div className="space-y-1 text-sm">
+                <div><span className="font-medium">{frequency === 'bulanan' ? 'Bulan' : 'Putaran'}:</span> {frequency === 'bulanan' ? `${MONTH_NAMES[transferData.monthIndex]} ${selectedYear}` : `Putaran ${transferData.monthIndex + 1} - ${sessions.find(s => s.id === selectedSessionId)?.name ?? ''}`}</div>
+                <div><span className="font-medium">Kategori:</span> {transferData.categoryName}</div>
+                <div><span className="font-medium">Total Nominal:</span> <span className="font-semibold text-emerald-600">{formatIDR(transferData.amount)}</span></div>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tujuan Buku Transaksi
+              </div>
+              {availableTargetBooks.length === 0 ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 dark:bg-rose-900/20 p-3 text-sm text-rose-700 dark:text-rose-300">
+                  Tidak ada buku transaksi tersedia. Buat buku transaksi terlebih dahulu.
+                </div>
+              ) : (
+                <Select
+                  value={selectedTargetBookId}
+                  onChange={(e) => setSelectedTargetBookId(e.target.value)}
+                >
+                  {availableTargetBooks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+            </div>
+            
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  setOpenTransferModal(false)
+                  setTimeout(() => setOpenDetailModal(true), 200)
+                }}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={handleTransfer}
+                disabled={availableTargetBooks.length === 0}
+              >
+                Transfer ke Buku Transaksi
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Success Modal */}
+      <SuccessModal
+        open={openSuccessModal}
+        onClose={handleSuccessModalClose}
+        title="Transfer Berhasil!"
+        message="Data berhasil ditransfer ke buku transaksi"
+        details={successData ? `${successData.categoryName} sebesar ${formatIDR(successData.amount)} telah ditransfer ke ${successData.targetBookName} pada tanggal hari ini.` : ''}
+        actionLabel="Lihat Transaksi"
+        onAction={handleViewTransactions}
+      />
     </div>
   )
 }
