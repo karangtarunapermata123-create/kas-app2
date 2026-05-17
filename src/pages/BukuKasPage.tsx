@@ -199,7 +199,7 @@ export default function BukuKasPage() {
                 className={
                   tab === 'dashboard'
                     ? 'rounded-lg px-3 py-2 text-sm font-medium bg-slate-900 dark:bg-slate-700 text-white'
-                    : 'rounded-lg px-3 py-2 text-sm font-medium bg-white border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-900 hover:bg-slate-50 dark:hover:bg-slate-100'
+                    : 'rounded-lg px-3 py-2 text-sm font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }
                 onClick={() => setTab('dashboard')}
               >
@@ -210,7 +210,7 @@ export default function BukuKasPage() {
                 className={
                   tab === 'laporan'
                     ? 'rounded-lg px-3 py-2 text-sm font-medium bg-slate-900 dark:bg-slate-700 text-white'
-                    : 'rounded-lg px-3 py-2 text-sm font-medium bg-white border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-900 hover:bg-slate-50 dark:hover:bg-slate-100'
+                    : 'rounded-lg px-3 py-2 text-sm font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                 }
                 onClick={() => setTab('laporan')}
               >
@@ -625,7 +625,7 @@ export default function BukuKasPage() {
   }
 
   return (
-    <div className="relative grid gap-4">
+    <div className="relative grid gap-4 overflow-x-hidden">
       <div className="flex flex-wrap gap-4">
         {books.map((b) => {
           const isRoutineBook = b.type === 'rutin'

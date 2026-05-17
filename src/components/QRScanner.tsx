@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 import Modal from './Modal'
 import Button from './Button'
@@ -12,37 +12,51 @@ type QRScannerProps = {
 export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [key, setKey] = useState(0)
-  const containerRef = useRef<HTMLDivElement>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanning = useRef(false)
+  const mountedRef = useRef(false)
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (open) {
-      setKey(prev => prev + 1)
+      mountedRef.current = true
       setScanning(false)
       setError(null)
-      
+
+      // Tunggu modal transisi selesai, lalu coba start kamera
       const timer = setTimeout(() => {
-        startScanning()
-      }, 100)
-      
-      return () => clearTimeout(timer)
+        if (mountedRef.current) startScanning()
+      }, 600)
+
+      return () => {
+        clearTimeout(timer)
+        stopScanning()
+        mountedRef.current = false
+      }
     } else {
+      mountedRef.current = false
       stopScanning()
     }
   }, [open])
 
   async function startScanning() {
-    if (isScanning.current || !containerRef.current) return
+    if (isScanning.current) return
     
     try {
       setError(null)
       setScanning(false)
-      const scannerId = `qr-reader-${Date.now()}-${key}`
-      containerRef.current.innerHTML = ''
-      containerRef.current.id = scannerId
-      const scanner = new Html5Qrcode(scannerId)
+
+      // Buat container untuk kamera
+      const containerId = `qr-reader-${Date.now()}`
+      const container = document.getElementById(containerId)
+      if (!container) {
+        // Container belum ada di DOM, coba lagi nanti
+        setTimeout(() => {
+          if (mountedRef.current) startScanning()
+        }, 200)
+        return
+      }
+      
+      const scanner = new Html5Qrcode(containerId)
       scannerRef.current = scanner
       isScanning.current = true
 
@@ -92,7 +106,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
 
   return (
     <Modal open={open} title="Scan QR Code Absensi" onClose={handleClose}>
-      <div key={key} className="grid gap-4">
+      <div className="grid gap-4">
         {error && (
           <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-4 py-3 text-sm text-rose-700 dark:text-rose-400">
             {error}
@@ -100,7 +114,7 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
         )}
         
         <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
-          <div ref={containerRef} className="w-full"></div>
+          <div id={`qr-reader-${Date.now()}`} className="w-full min-h-[200px]"></div>
           {!scanning && !error && (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-sm text-slate-500 dark:text-slate-400">Memulai kamera...</div>

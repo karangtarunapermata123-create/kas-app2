@@ -266,6 +266,7 @@ export default function AbsensiPage() {
 
   // QR Code states
   const [openQRScanner, setOpenQRScanner] = useState(false)
+  const [qrScannerKey, setQrScannerKey] = useState(0)
   const [openQRDisplay, setOpenQRDisplay] = useState(false)
   const [qrData, setQrData] = useState('')
   const [qrMessage, setQrMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -617,71 +618,79 @@ export default function AbsensiPage() {
 
   if (selectedActivity && selectedSession) {
     return (
-      <div className="grid gap-4">
-        {/* Info dan tombol admin */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            <span>{formatDate(selectedSession.date)}</span>
+      <>
+        <div className="grid gap-4">
+          {/* Info dan tombol admin */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              <span>{formatDate(selectedSession.date)}</span>
+            </div>
+            {/* Tombol Tampilkan QR untuk admin */}
+            {userCanEdit && (
+              <Button onClick={handleShowQR}>
+                🔲 Tampilkan QR
+              </Button>
+            )}
           </div>
-          {/* Tombol Tampilkan QR untuk admin */}
-          {userCanEdit && (
-            <Button onClick={handleShowQR}>
-              🔲 Tampilkan QR
-            </Button>
+
+          <AttendanceTable
+            allProfiles={allProfiles}
+            records={records}
+            onOpenStatus={handleOpenStatus}
+            canEdit={userCanEdit}
+          />
+
+          <StatusModal
+            open={openStatus}
+            memberName={activeMemberName}
+            currentStatus={activeStatus}
+            onClose={() => { 
+              setOpenStatus(false)
+              setActiveProfileId(null)
+              setActiveMemberName(null)
+              setActiveStatus(null)
+            }}
+            onSet={handleSetStatus}
+            onDelete={handleDeleteStatus}
+          />
+
+          <QRDisplay
+            open={openQRDisplay}
+            onClose={() => setOpenQRDisplay(false)}
+            data={qrData}
+            title={`QR Absensi - ${selectedSession.label}`}
+            description={`${selectedActivity.name} - ${selectedSession.label}`}
+          />
+
+          {/* FAB - Scan QR (untuk semua user) */}
+          {!openQRScanner && !openQRDisplay && (
+            <button
+              type="button"
+              aria-label="Scan QR Code"
+              className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+              onClick={() => {
+                setQrScannerKey(k => k + 1)
+                setOpenQRScanner(true)
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
           )}
         </div>
 
-        <AttendanceTable
-          allProfiles={allProfiles}
-          records={records}
-          onOpenStatus={handleOpenStatus}
-          canEdit={userCanEdit}
+        {/* QR Scanner - selalu dirender di luar grid agar tidak ikut if/else */}
+        <QRScanner
+          key={qrScannerKey}
+          open={openQRScanner}
+          onClose={() => setOpenQRScanner(false)}
+          onScan={handleScanQR}
         />
-
-        <StatusModal
-          open={openStatus}
-          memberName={activeMemberName}
-          currentStatus={activeStatus}
-          onClose={() => { 
-            setOpenStatus(false)
-            setActiveProfileId(null)
-            setActiveMemberName(null)
-            setActiveStatus(null)
-          }}
-          onSet={handleSetStatus}
-          onDelete={handleDeleteStatus}
-        />
-
-        <QRDisplay
-          open={openQRDisplay}
-          onClose={() => setOpenQRDisplay(false)}
-          data={qrData}
-          title={`QR Absensi - ${selectedSession.label}`}
-          description={`${selectedActivity.name} - ${selectedSession.label}`}
-        />
-
-        {/* FAB - Scan QR (untuk semua user) */}
-        {!openQRScanner && !openQRDisplay && (
-          <button
-            type="button"
-            aria-label="Scan QR Code"
-            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-            onClick={() => {
-              setOpenQRScanner(false)
-              setTimeout(() => {
-                setOpenQRScanner(true)
-              }, 50)
-            }}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-            </svg>
-          </button>
-        )}
-      </div>
+      </>
     )
   }
 
@@ -691,320 +700,449 @@ export default function AbsensiPage() {
     const isRutin = selectedActivity.type === 'rutin'
 
     return (
-      <div className="grid gap-4">
-        {/* Info meta */}
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-            <span className={`rounded-full px-2 py-0.5 font-medium ${isRutin ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400' : 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'}`}>
-              {isRutin ? 'Rutin' : 'Sekali'}
-            </span>
-            {isRutin && selectedActivity.frequency && (
-              <>
-                <span>·</span>
-                <span className="capitalize">{selectedActivity.frequency}</span>
-              </>
+      <>
+        <div className="grid gap-4">
+          {/* Info meta */}
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span className={`rounded-full px-2 py-0.5 font-medium ${isRutin ? 'bg-violet-50 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400' : 'bg-sky-50 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400'}`}>
+                {isRutin ? 'Rutin' : 'Sekali'}
+              </span>
+              {isRutin && selectedActivity.frequency && (
+                <>
+                  <span>·</span>
+                  <span className="capitalize">{selectedActivity.frequency}</span>
+                </>
+              )}
+              <span>·</span>
+              <span>{formatDate(selectedActivity.date)}</span>
+            </div>
+            {!isRutin && userCanEdit && (
+              <Button onClick={handleShowQR}>
+                🔲 Tampilkan QR
+              </Button>
             )}
-            <span>·</span>
-            <span>{formatDate(selectedActivity.date)}</span>
           </div>
-          {!isRutin && userCanEdit && (
-            <Button onClick={handleShowQR}>
-              🔲 Tampilkan QR
-            </Button>
-          )}
-        </div>
 
-        {isRutin ? (
-          /* ── Kegiatan rutin: tampilkan tabel kehadiran semua sesi ── */
-          <>
-            {sessions.length === 0 ? (
-              <Card title="Sesi">
-                <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
-                  Belum ada sesi. Klik "+ Sesi" untuk menambahkan sesi baru.
-                </div>
-              </Card>
-            ) : (
-              <>
-                {/* Legend - COMPACT (di atas tabel) */}
-                <div className="mb-3 pb-3 border-b dark:border-slate-700 flex flex-wrap gap-2 sm:gap-3 text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold">✓</span>
-                    <span className="text-slate-600 dark:text-slate-400">Hadir</span>
+          {isRutin ? (
+            /* ── Kegiatan rutin: tampilkan tabel kehadiran semua sesi ── */
+            <>
+              {sessions.length === 0 ? (
+                <Card title="Sesi">
+                  <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
+                    Belum ada sesi. Klik "+ Sesi" untuk menambahkan sesi baru.
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500 text-xs font-bold">~</span>
-                    <span className="text-slate-600 dark:text-slate-400">Izin</span>
+                </Card>
+              ) : (
+                <>
+                  {/* Legend - COMPACT (di atas tabel) */}
+                  <div className="mb-3 pb-3 border-b dark:border-slate-700 flex flex-wrap gap-2 sm:gap-3 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 text-xs font-bold">✓</span>
+                      <span className="text-slate-600 dark:text-slate-400">Hadir</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500 text-xs font-bold">~</span>
+                      <span className="text-slate-600 dark:text-slate-400">Izin</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500 text-xs font-bold">✗</span>
+                      <span className="text-slate-600 dark:text-slate-400">Tidak Hadir</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500"></span>
+                      <span className="text-slate-600 dark:text-slate-400">Belum</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500 text-xs font-bold">✗</span>
-                    <span className="text-slate-600 dark:text-slate-400">Tidak Hadir</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border-2 border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500"></span>
-                    <span className="text-slate-600 dark:text-slate-400">Belum</span>
-                  </div>
-                </div>
 
-                {/* Tabel dengan sticky column - COMPACT & RESPONSIVE */}
-                <div 
-                  ref={scrollContainerRef}
-                  onMouseDown={handleMouseDown}
-                  onMouseLeave={handleMouseLeave}
-                  onMouseUp={handleMouseUp}
-                  onMouseMove={handleMouseMove}
-                  className={`max-h-[70vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
-                >
-                  <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm" style={{ tableLayout: 'fixed' }}>
-                    <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
-                      <tr>
-                        {/* Sticky column header - Nama */}
-                        <th className="sticky left-0 top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-left font-semibold" style={{ width: '140px' }}>
-                          Nama
-                        </th>
-                        {/* Session headers - clickable */}
-                        {sessions.map((session, index) => {
-                          const stats = sessionStats[session.id]
-                          const hadir = stats?.hadir ?? 0
-                          const total = stats?.total ?? 0
-                          return (
-                            <th 
-                              key={session.id}
-                              className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-2 text-center font-semibold"
-                              style={{ width: '56px' }}
-                            >
-                              <div className="flex flex-col items-center">
-                                <button
-                                  id={`session-btn-${session.id}`}
-                                  type="button"
-                                  className="text-sm hover:text-slate-900 dark:hover:text-white transition font-bold"
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setOpenTooltipSessionId(openTooltipSessionId === session.id ? null : session.id)
-                                  }}
-                                >
-                                  {index + 1}
-                                </button>
-                                {/* Info tooltip with QR and Delete button */}
-                                <div 
-                                  id={`session-info-${session.id}`}
-                                  className={`${openTooltipSessionId === session.id ? '' : 'hidden'} absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-slate-900 dark:bg-slate-700 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap`}
-                                >
-                                  <div className="font-normal text-left">
-                                    <div className="font-semibold mb-1">{session.label}</div>
-                                    <div className="text-slate-300 text-xs">{formatDate(session.date)}</div>
-                                    <div className="mt-1 pt-1 border-t border-slate-600">
-                                      <span className="text-emerald-400">{hadir}</span>
-                                      <span className="text-slate-400">/{total} hadir</span>
+                  {/* Tabel dengan sticky column - COMPACT & RESPONSIVE */}
+                  <div 
+                    ref={scrollContainerRef}
+                    onMouseDown={handleMouseDown}
+                    onMouseLeave={handleMouseLeave}
+                    onMouseUp={handleMouseUp}
+                    onMouseMove={handleMouseMove}
+                    className={`max-h-[70vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 ${isDragging ? 'cursor-grabbing' : 'cursor-grab'} select-none`}
+                  >
+                    <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm" style={{ tableLayout: 'fixed' }}>
+                      <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                        <tr>
+                          {/* Sticky column header - Nama */}
+                          <th className="sticky left-0 top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-left font-semibold" style={{ width: '140px' }}>
+                            Nama
+                          </th>
+                          {/* Session headers - clickable */}
+                          {sessions.map((session, index) => {
+                            const stats = sessionStats[session.id]
+                            const hadir = stats?.hadir ?? 0
+                            const total = stats?.total ?? 0
+                            return (
+                              <th 
+                                key={session.id}
+                                className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-2 text-center font-semibold"
+                                style={{ width: '56px' }}
+                              >
+                                <div className="flex flex-col items-center">
+                                  <button
+                                    id={`session-btn-${session.id}`}
+                                    type="button"
+                                    className="text-sm hover:text-slate-900 dark:hover:text-white transition font-bold"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setOpenTooltipSessionId(openTooltipSessionId === session.id ? null : session.id)
+                                    }}
+                                  >
+                                    {index + 1}
+                                  </button>
+                                  {/* Info tooltip with QR and Delete button */}
+                                  <div 
+                                    id={`session-info-${session.id}`}
+                                    className={`${openTooltipSessionId === session.id ? '' : 'hidden'} absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-slate-900 dark:bg-slate-700 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-nowrap`}
+                                  >
+                                    <div className="font-normal text-left">
+                                      <div className="font-semibold mb-1">{session.label}</div>
+                                      <div className="text-slate-300 text-xs">{formatDate(session.date)}</div>
+                                      <div className="mt-1 pt-1 border-t border-slate-600">
+                                        <span className="text-emerald-400">{hadir}</span>
+                                        <span className="text-slate-400">/{total} hadir</span>
+                                      </div>
+                                      {/* Buttons */}
+                                      {userCanEdit && (
+                                        <div className="flex gap-1 mt-2">
+                                          {/* QR Button */}
+                                          <button
+                                            type="button"
+                                            onClick={async (e) => {
+                                              e.stopPropagation()
+                                              setOpenTooltipSessionId(null)
+                                              // Show QR for this session
+                                              try {
+                                                const token = await getOrGenerateSessionQRToken(session.id)
+                                                const baseUrl = window.location.origin
+                                                const qrUrl = `${baseUrl}/absensi/scan?token=${token}`
+                                                setQrData(qrUrl)
+                                                setOpenQRDisplay(true)
+                                              } catch (error) {
+                                                console.error('Error generating QR:', error)
+                                                alert('Gagal membuat QR code')
+                                              }
+                                            }}
+                                            className="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
+                                          >
+                                            🔲 QR
+                                          </button>
+                                          {/* Delete Button */}
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              setOpenTooltipSessionId(null)
+                                              handleDeleteSession(session.id)
+                                            }}
+                                            className="flex-1 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition"
+                                          >
+                                            🗑️ Hapus
+                                          </button>
+                                        </div>
+                                      )}
                                     </div>
-                                    {/* Buttons */}
-                                    {userCanEdit && (
-                                      <div className="flex gap-1 mt-2">
-                                        {/* QR Button */}
+                                    {/* Arrow */}
+                                    <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-slate-700 rotate-45"></div>
+                                  </div>
+                                </div>
+                              </th>
+                            )
+                          })}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allProfiles.length === 0 ? (
+                          <tr>
+                            <td colSpan={sessions.length + 1} className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                              Belum ada user. Tambahkan user di halaman Pengaturan.
+                            </td>
+                          </tr>
+                        ) : (
+                          allProfiles.map((profile, profileIndex) => {
+                            return (
+                              <tr key={profile.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                                {/* Sticky column - Nama */}
+                                <td className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs sm:text-sm font-medium text-slate-900 dark:text-white" style={{ minWidth: '140px' }}>
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-slate-400 dark:text-slate-500 text-xs w-4">{profileIndex + 1}</span>
+                                    <span className="truncate">{profile.full_name}</span>
+                                  </div>
+                                </td>
+                                {/* Session attendance cells */}
+                                {sessions.map((session) => {
+                                  // Get attendance record for this profile in this session
+                                  const sessionRecords = records.filter(r => r.sessionId === session.id)
+                                  const record = sessionRecords.find(r => 
+                                    r.memberName.toLowerCase().trim() === profile.full_name.toLowerCase().trim()
+                                  )
+                                  const status = record?.status ?? null
+                                  
+                                  return (
+                                    <td key={session.id} className="border-b border-r border-slate-200 dark:border-slate-700 py-2">
+                                      <div className="flex items-center justify-center">
                                         <button
                                           type="button"
-                                          onClick={async (e) => {
-                                            e.stopPropagation()
-                                            setOpenTooltipSessionId(null)
-                                            // Show QR for this session
-                                            try {
-                                              const token = await getOrGenerateSessionQRToken(session.id)
-                                              const baseUrl = window.location.origin
-                                              const qrUrl = `${baseUrl}/absensi/scan?token=${token}`
-                                              setQrData(qrUrl)
-                                              setOpenQRDisplay(true)
-                                            } catch (error) {
-                                              console.error('Error generating QR:', error)
-                                              alert('Gagal membuat QR code')
-                                            }
+                                          onClick={async () => {
+                                            if (!userCanEdit) return
+                                            // Set context untuk modal
+                                            setActiveProfileId(profile.id)
+                                            setActiveMemberName(profile.full_name)
+                                            setActiveStatus(status)
+                                            // Store sessionId untuk update
+                                            setActiveSessionId(session.id)
+                                            setOpenStatus(true)
                                           }}
-                                          className="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
+                                          disabled={!userCanEdit}
+                                          className={`inline-flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition ${
+                                            userCanEdit ? 'hover:scale-110 cursor-pointer' : 'cursor-not-allowed opacity-60'
+                                          } ${
+                                            status === 'hadir'
+                                              ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                                              : status === 'izin'
+                                                ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500'
+                                                : status === 'tidak-hadir'
+                                                  ? 'border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500'
+                                                  : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500 hover:border-slate-400 dark:hover:border-slate-500'
+                                          }`}
+                                          aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
                                         >
-                                          🔲 QR
-                                        </button>
-                                        {/* Delete Button */}
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation()
-                                            setOpenTooltipSessionId(null)
-                                            handleDeleteSession(session.id)
-                                          }}
-                                          className="flex-1 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition"
-                                        >
-                                          🗑️ Hapus
+                                          {status === 'hadir' ? '✓' : status === 'izin' ? '~' : status === 'tidak-hadir' ? '✗' : ''}
                                         </button>
                                       </div>
-                                    )}
-                                  </div>
-                                  {/* Arrow */}
-                                  <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 dark:bg-slate-700 rotate-45"></div>
-                                </div>
-                              </div>
-                            </th>
-                          )
-                        })}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allProfiles.length === 0 ? (
-                        <tr>
-                          <td colSpan={sessions.length + 1} className="py-6 text-center text-sm text-slate-500 dark:text-slate-400">
-                            Belum ada user. Tambahkan user di halaman Pengaturan.
-                          </td>
-                        </tr>
-                      ) : (
-                        allProfiles.map((profile, profileIndex) => {
-                          return (
-                            <tr key={profile.id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50">
-                              {/* Sticky column - Nama */}
-                              <td className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs sm:text-sm font-medium text-slate-900 dark:text-white" style={{ minWidth: '140px' }}>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-slate-400 dark:text-slate-500 text-xs w-4">{profileIndex + 1}</span>
-                                  <span className="truncate">{profile.full_name}</span>
-                                </div>
-                              </td>
-                              {/* Session attendance cells */}
-                              {sessions.map((session) => {
-                                // Get attendance record for this profile in this session
-                                const sessionRecords = records.filter(r => r.sessionId === session.id)
-                                const record = sessionRecords.find(r => 
-                                  r.memberName.toLowerCase().trim() === profile.full_name.toLowerCase().trim()
-                                )
-                                const status = record?.status ?? null
-                                
-                                return (
-                                  <td key={session.id} className="border-b border-r border-slate-200 dark:border-slate-700 py-2">
-                                    <div className="flex items-center justify-center">
-                                      <button
-                                        type="button"
-                                        onClick={async () => {
-                                          if (!userCanEdit) return
-                                          // Set context untuk modal
-                                          setActiveProfileId(profile.id)
-                                          setActiveMemberName(profile.full_name)
-                                          setActiveStatus(status)
-                                          // Store sessionId untuk update
-                                          setActiveSessionId(session.id)
-                                          setOpenStatus(true)
-                                        }}
-                                        disabled={!userCanEdit}
-                                        className={`inline-flex h-7 w-7 items-center justify-center rounded-full border-2 text-xs font-bold transition ${
-                                          userCanEdit ? 'hover:scale-110 cursor-pointer' : 'cursor-not-allowed opacity-60'
-                                        } ${
-                                          status === 'hadir'
-                                            ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-                                            : status === 'izin'
-                                              ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-500'
-                                              : status === 'tidak-hadir'
-                                                ? 'border-rose-400 bg-rose-50 dark:bg-rose-900/30 text-rose-600 dark:text-rose-500'
-                                                : 'border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-300 dark:text-slate-500 hover:border-slate-400 dark:hover:border-slate-500'
-                                        }`}
-                                        aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
-                                      >
-                                        {status === 'hadir' ? '✓' : status === 'izin' ? '~' : status === 'tidak-hadir' ? '✗' : ''}
-                                      </button>
-                                    </div>
-                                  </td>
-                                )
-                              })}
-                            </tr>
-                          )
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
+                                    </td>
+                                  )
+                                })}
+                              </tr>
+                            )
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
 
-            {/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin */}
-            {userCanEdit && isRutin && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSessionLabel(suggestSessionLabel(selectedActivity))
-                  setSessionDate(new Date().toISOString().split('T')[0])
-                  setOpenAddSession(true)
+              {/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin */}
+              {userCanEdit && isRutin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSessionLabel(suggestSessionLabel(selectedActivity))
+                    setSessionDate(new Date().toISOString().split('T')[0])
+                    setOpenAddSession(true)
+                  }}
+                  className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
+                  aria-label="Tambah Sesi"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+                    <path d="M12 5v14" /><path d="M5 12h14" />
+                  </svg>
+                </button>
+              )}
+
+              {/* Status Modal untuk edit kehadiran */}
+              <StatusModal
+                open={openStatus}
+                memberName={activeMemberName}
+                currentStatus={activeStatus}
+                onClose={() => { 
+                  setOpenStatus(false)
+                  setActiveProfileId(null)
+                  setActiveMemberName(null)
+                  setActiveStatus(null)
+                  setActiveSessionId(null)
                 }}
-                className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
-                aria-label="Tambah Sesi"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
-                  <path d="M12 5v14" /><path d="M5 12h14" />
-                </svg>
-              </button>
-            )}
+                onSet={handleSetStatus}
+                onDelete={handleDeleteStatus}
+              />
 
-            {/* Status Modal untuk edit kehadiran */}
-            <StatusModal
-              open={openStatus}
-              memberName={activeMemberName}
-              currentStatus={activeStatus}
-              onClose={() => { 
-                setOpenStatus(false)
-                setActiveProfileId(null)
-                setActiveMemberName(null)
-                setActiveStatus(null)
-                setActiveSessionId(null)
+              {/* QR Display Modal */}
+              <QRDisplay
+                open={openQRDisplay}
+                onClose={() => setOpenQRDisplay(false)}
+                data={qrData}
+                title={selectedActivity ? `QR Absensi - ${selectedActivity.name}` : 'QR Absensi'}
+                description={selectedActivity?.name}
+              />
+            </>
+          ) : (
+            /* ── Kegiatan sekali: langsung tampilkan absensi ── */
+            <>
+              <AttendanceTable
+                allProfiles={allProfiles}
+                records={records}
+                onOpenStatus={handleOpenStatus}
+                canEdit={userCanEdit}
+              />
+
+              <StatusModal
+                open={openStatus}
+                memberName={activeMemberName}
+                currentStatus={activeStatus}
+                onClose={() => { 
+                  setOpenStatus(false)
+                  setActiveProfileId(null)
+                  setActiveMemberName(null)
+                  setActiveStatus(null)
+                }}
+                onSet={handleSetStatus}
+                onDelete={handleDeleteStatus}
+              />
+
+              <QRDisplay
+                open={openQRDisplay}
+                onClose={() => setOpenQRDisplay(false)}
+                data={qrData}
+                title={`QR Absensi - ${selectedActivity.name}`}
+                description={selectedActivity.name}
+              />
+            </>
+          )}
+
+          {/* FAB - Scan QR (untuk semua user di detail kegiatan) */}
+          {!openQRScanner && !openQRDisplay && (
+            <button
+              type="button"
+              aria-label="Scan QR Code"
+              className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+              onClick={() => {
+                setQrScannerKey(k => k + 1)
+                setOpenQRScanner(true)
               }}
-              onSet={handleSetStatus}
-              onDelete={handleDeleteStatus}
-            />
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
+          )}
 
-            {/* QR Display Modal */}
-            <QRDisplay
-              open={openQRDisplay}
-              onClose={() => setOpenQRDisplay(false)}
-              data={qrData}
-              title={selectedActivity ? `QR Absensi - ${selectedActivity.name}` : 'QR Absensi'}
-              description={selectedActivity?.name}
-            />
-          </>
-        ) : (
-          /* ── Kegiatan sekali: langsung tampilkan absensi ── */
-          <>
-            <AttendanceTable
-              allProfiles={allProfiles}
-              records={records}
-              onOpenStatus={handleOpenStatus}
-              canEdit={userCanEdit}
-            />
+          {/* Modal tambah sesi */}
+          <Modal open={openAddSession} title="Tambah Sesi" onClose={() => setOpenAddSession(false)}>
+            <div className="grid gap-3">
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600">Label Sesi</div>
+                <Input
+                  placeholder={selectedActivity.frequency === 'bulanan' ? 'Contoh: Januari 2026' : 'Contoh: Minggu 1 — Januari 2026'}
+                  value={sessionLabel}
+                  onChange={(e) => setSessionLabel(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600">Tanggal</div>
+                <Input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="secondary" onClick={() => setOpenAddSession(false)}>Batal</Button>
+                <Button onClick={handleAddSession} disabled={!sessionLabel.trim()}>Simpan</Button>
+              </div>
+            </div>
+          </Modal>
+        </div>
 
-            <StatusModal
-              open={openStatus}
-              memberName={activeMemberName}
-              currentStatus={activeStatus}
-              onClose={() => { 
-                setOpenStatus(false)
-                setActiveProfileId(null)
-                setActiveMemberName(null)
-                setActiveStatus(null)
-              }}
-              onSet={handleSetStatus}
-              onDelete={handleDeleteStatus}
-            />
+        {/* QR Scanner - selalu dirender di luar grid */}
+        <QRScanner
+          key={qrScannerKey}
+          open={openQRScanner}
+          onClose={() => setOpenQRScanner(false)}
+          onScan={handleScanQR}
+        />
+      </>
+    )
+  }
 
-            <QRDisplay
-              open={openQRDisplay}
-              onClose={() => setOpenQRDisplay(false)}
-              data={qrData}
-              title={`QR Absensi - ${selectedActivity.name}`}
-              description={selectedActivity.name}
-            />
-          </>
-        )}
+  // ── Render: daftar kegiatan ──────────────────────────────────────────────
 
-        {/* FAB - Scan QR (untuk semua user di detail kegiatan) */}
+  return (
+    <>
+      <div className="grid gap-4">
+        {/* Filter */}
+        <div className="flex items-center gap-2">
+          {(['semua', 'sekali', 'rutin'] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setFilterType(t)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
+                filterType === t 
+                  ? 'bg-slate-900 dark:bg-slate-700 text-white' 
+                  : 'bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+            >
+              {t.charAt(0).toUpperCase() + t.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <Card title="Daftar Kegiatan">
+          {filtered.length === 0 ? (
+            <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
+              Belum ada kegiatan. Klik tombol + untuk membuat kegiatan baru.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="py-2 pr-3">Nama Kegiatan</th>
+                    <th className="py-2 pr-3">Tipe</th>
+                    <th className="py-2 pr-3">Tanggal</th>
+                    <th className="py-2 pr-3 text-right">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((activity) => {
+                    return (
+                      <tr
+                        key={activity.id}
+                        className="border-t dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        onClick={() => navigate(`/absensi/${activity.id}`)}
+                      >
+                        <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">{activity.name}</td>
+                        <td className="py-2 pr-3">
+                          <span className={`text-xs font-medium border-b-2 pb-0.5 ${activity.type === 'rutin' ? 'border-violet-500 text-violet-700 dark:text-violet-400' : 'border-sky-500 text-sky-700 dark:text-sky-400'}`}>
+                            {activity.type === 'rutin'
+                              ? `Rutin · ${activity.frequency === 'bulanan' ? 'Bulanan' : 'Mingguan'}`
+                              : 'Sekali'}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">{activity.date}</td>
+                        <td className="py-2 pr-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          {userCanEdit && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteActivity(activity.id)}
+                              className="text-xs text-rose-600 dark:text-rose-400 hover:underline"
+                            >
+                              Hapus
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        {/* FAB - Scan QR (untuk semua user) */}
         {!openQRScanner && !openQRDisplay && (
           <button
             type="button"
             aria-label="Scan QR Code"
             className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
             onClick={() => {
-              setOpenQRScanner(false)
-              setTimeout(() => {
-                setOpenQRScanner(true)
-              }, 50)
+              setQrScannerKey(k => k + 1)
+              setOpenQRScanner(true)
             }}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
@@ -1016,288 +1154,167 @@ export default function AbsensiPage() {
           </button>
         )}
 
-        {/* Modal tambah sesi */}
-        <Modal open={openAddSession} title="Tambah Sesi" onClose={() => setOpenAddSession(false)}>
+        {/* FAB - Tambah Kegiatan (hanya admin) */}
+        {userCanEdit && (
+          <button
+            type="button"
+            aria-label="Tambah kegiatan"
+            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
+            onClick={() => setOpenAddActivity(true)}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
+              <path d="M12 5v14" /><path d="M5 12h14" />
+            </svg>
+          </button>
+        )}
+
+        {/* QR Message - Global */}
+        {qrMessage && (
+          <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg animate-in fade-in slide-in-from-top-2 duration-300 max-w-md ${
+            qrMessage.type === 'success' 
+              ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
+              : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
+          }`}>
+            <div className="flex items-center gap-2">
+              {qrMessage.type === 'success' ? (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                  <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="8" x2="12" y2="12"></line>
+                  <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+              )}
+              <span className="font-medium">{qrMessage.text}</span>
+            </div>
+          </div>
+        )}
+
+        {/* Modal tambah kegiatan */}
+        <Modal open={openAddActivity} title="Tambah Kegiatan" onClose={() => setOpenAddActivity(false)}>
           <div className="grid gap-3">
             <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Label Sesi</div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Nama Kegiatan</div>
               <Input
-                placeholder={selectedActivity.frequency === 'bulanan' ? 'Contoh: Januari 2026' : 'Contoh: Minggu 1 — Januari 2026'}
-                value={sessionLabel}
-                onChange={(e) => setSessionLabel(e.target.value)}
+                placeholder="Contoh: Kerja Bakti, Rapat Bulanan"
+                value={activityName}
+                onChange={(e) => setActivityName(e.target.value)}
               />
             </div>
             <div>
-              <div className="mb-1 text-xs font-medium text-slate-600">Tanggal</div>
-              <Input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} />
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Tipe</div>
+              <Select value={activityType} onChange={(e) => setActivityType(e.target.value as 'sekali' | 'rutin')}>
+                <option value="sekali">Sekali</option>
+                <option value="rutin">Rutin</option>
+              </Select>
+              <div className="mt-1 text-xs text-slate-400">
+                {activityType === 'sekali' ? 'Kegiatan yang dilakukan satu kali.' : 'Kegiatan yang dilakukan secara berkala.'}
+              </div>
+            </div>
+            {activityType === 'rutin' && (
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Frekuensi</div>
+                <Select value={activityFrequency} onChange={(e) => setActivityFrequency(e.target.value as 'mingguan' | 'bulanan')}>
+                  <option value="mingguan">Mingguan</option>
+                  <option value="bulanan">Bulanan</option>
+                </Select>
+              </div>
+            )}
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Tanggal Mulai</div>
+              <Input type="date" value={activityDate} onChange={(e) => setActivityDate(e.target.value)} />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Deskripsi (opsional)</div>
+              <Input
+                placeholder="Deskripsi singkat kegiatan"
+                value={activityDescription}
+                onChange={(e) => setActivityDescription(e.target.value)}
+              />
             </div>
             <div className="flex justify-end gap-2 pt-1">
-              <Button variant="secondary" onClick={() => setOpenAddSession(false)}>Batal</Button>
-              <Button onClick={handleAddSession} disabled={!sessionLabel.trim()}>Simpan</Button>
+              <Button variant="secondary" onClick={() => setOpenAddActivity(false)}>Batal</Button>
+              <Button onClick={handleAddActivity} disabled={!activityName.trim()}>Simpan</Button>
+            </div>
+          </div>
+        </Modal>
+
+        {/* Modal hapus kegiatan */}
+        <Modal 
+          open={openDeleteActivity} 
+          title="Hapus Kegiatan" 
+          onClose={() => {
+            setOpenDeleteActivity(false)
+            setDeleteActivityId(null)
+            setDeleteActivityName('')
+            setDeleteConfirmText('')
+          }}
+        >
+          <div className="grid gap-4">
+            <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 p-3">
+              <div className="flex gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-600 dark:text-rose-400 shrink-0">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+                  <line x1="12" y1="9" x2="12" y2="13"></line>
+                  <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                </svg>
+                <div className="text-sm text-rose-700 dark:text-rose-400">
+                  <div className="font-semibold mb-1">Peringatan!</div>
+                  <div>Tindakan ini akan menghapus kegiatan <span className="font-semibold">"{deleteActivityName}"</span> beserta seluruh data absensi dan sesi yang terkait. Tindakan ini tidak dapat dibatalkan.</div>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                Untuk konfirmasi, ketik nama kegiatan: <span className="font-semibold text-slate-900 dark:text-white">{deleteActivityName}</span>
+              </div>
+              <Input
+                placeholder="Ketik nama kegiatan"
+                value={deleteConfirmText}
+                onChange={(e) => setDeleteConfirmText(e.target.value)}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button 
+                variant="secondary" 
+                onClick={() => {
+                  setOpenDeleteActivity(false)
+                  setDeleteActivityId(null)
+                  setDeleteActivityName('')
+                  setDeleteConfirmText('')
+                }}
+              >
+                Batal
+              </Button>
+              <button
+                type="button"
+                onClick={confirmDeleteActivity}
+                disabled={deleteConfirmText !== deleteActivityName}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                  deleteConfirmText === deleteActivityName
+                    ? 'bg-rose-600 text-white hover:bg-rose-700'
+                    : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
+                }`}
+              >
+                Hapus Kegiatan
+              </button>
             </div>
           </div>
         </Modal>
       </div>
-    )
-  }
 
-  // ── Render: daftar kegiatan ──────────────────────────────────────────────
-
-  return (
-    <div className="grid gap-4">
-      {/* Filter */}
-      <div className="flex items-center gap-2">
-        {(['semua', 'sekali', 'rutin'] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setFilterType(t)}
-            className={`rounded-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
-              filterType === t 
-                ? 'bg-slate-900 dark:bg-slate-700 text-white' 
-                : 'bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
-            }`}
-          >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      <Card title="Daftar Kegiatan">
-        {filtered.length === 0 ? (
-          <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
-            Belum ada kegiatan. Klik tombol + untuk membuat kegiatan baru.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                <tr>
-                  <th className="py-2 pr-3">Nama Kegiatan</th>
-                  <th className="py-2 pr-3">Tipe</th>
-                  <th className="py-2 pr-3">Tanggal</th>
-                  <th className="py-2 pr-3 text-right">Aksi</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((activity) => {
-                  return (
-                    <tr
-                      key={activity.id}
-                      className="border-t dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                      onClick={() => navigate(`/absensi/${activity.id}`)}
-                    >
-                      <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">{activity.name}</td>
-                      <td className="py-2 pr-3">
-                        <span className={`text-xs font-medium border-b-2 pb-0.5 ${activity.type === 'rutin' ? 'border-violet-500 text-violet-700 dark:text-violet-400' : 'border-sky-500 text-sky-700 dark:text-sky-400'}`}>
-                          {activity.type === 'rutin'
-                            ? `Rutin · ${activity.frequency === 'bulanan' ? 'Bulanan' : 'Mingguan'}`
-                            : 'Sekali'}
-                        </span>
-                      </td>
-                      <td className="py-2 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">{activity.date}</td>
-                      <td className="py-2 pr-3 text-right" onClick={(e) => e.stopPropagation()}>
-                        {userCanEdit && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteActivity(activity.id)}
-                            className="text-xs text-rose-600 dark:text-rose-400 hover:underline"
-                          >
-                            Hapus
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      {/* FAB - Scan QR (untuk semua user) */}
-      {!openQRScanner && !openQRDisplay && (
-        <button
-          type="button"
-          aria-label="Scan QR Code"
-          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-          onClick={() => {
-            setOpenQRScanner(false)
-            setTimeout(() => {
-              setOpenQRScanner(true)
-            }, 50)
-          }}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
-            <rect x="3" y="3" width="7" height="7" />
-            <rect x="14" y="3" width="7" height="7" />
-            <rect x="14" y="14" width="7" height="7" />
-            <rect x="3" y="14" width="7" height="7" />
-          </svg>
-        </button>
-      )}
-
-      {/* FAB - Tambah Kegiatan (hanya admin) */}
-      {userCanEdit && (
-        <button
-          type="button"
-          aria-label="Tambah kegiatan"
-          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
-          onClick={() => setOpenAddActivity(true)}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7" aria-hidden="true">
-            <path d="M12 5v14" /><path d="M5 12h14" />
-          </svg>
-        </button>
-      )}
-
-      {/* QR Scanner Modal - Global */}
+      {/* QR Scanner - selalu dirender di luar grid */}
       <QRScanner
+        key={qrScannerKey}
         open={openQRScanner}
         onClose={() => setOpenQRScanner(false)}
         onScan={handleScanQR}
       />
-
-      {/* QR Message - Global */}
-      {qrMessage && (
-        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-4 py-3 text-sm shadow-lg animate-in fade-in slide-in-from-top-2 duration-300 max-w-md ${
-          qrMessage.type === 'success' 
-            ? 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400'
-            : 'bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
-        }`}>
-          <div className="flex items-center gap-2">
-            {qrMessage.type === 'success' ? (
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                <polyline points="22 4 12 14.01 9 11.01"></polyline>
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
-                <circle cx="12" cy="12" r="10"></circle>
-                <line x1="12" y1="8" x2="12" y2="12"></line>
-                <line x1="12" y1="16" x2="12.01" y2="16"></line>
-              </svg>
-            )}
-            <span className="font-medium">{qrMessage.text}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Modal tambah kegiatan */}
-      <Modal open={openAddActivity} title="Tambah Kegiatan" onClose={() => setOpenAddActivity(false)}>
-        <div className="grid gap-3">
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Nama Kegiatan</div>
-            <Input
-              placeholder="Contoh: Kerja Bakti, Rapat Bulanan"
-              value={activityName}
-              onChange={(e) => setActivityName(e.target.value)}
-            />
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Tipe</div>
-            <Select value={activityType} onChange={(e) => setActivityType(e.target.value as 'sekali' | 'rutin')}>
-              <option value="sekali">Sekali</option>
-              <option value="rutin">Rutin</option>
-            </Select>
-            <div className="mt-1 text-xs text-slate-400">
-              {activityType === 'sekali' ? 'Kegiatan yang dilakukan satu kali.' : 'Kegiatan yang dilakukan secara berkala.'}
-            </div>
-          </div>
-          {activityType === 'rutin' && (
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Frekuensi</div>
-              <Select value={activityFrequency} onChange={(e) => setActivityFrequency(e.target.value as 'mingguan' | 'bulanan')}>
-                <option value="mingguan">Mingguan</option>
-                <option value="bulanan">Bulanan</option>
-              </Select>
-            </div>
-          )}
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Tanggal Mulai</div>
-            <Input type="date" value={activityDate} onChange={(e) => setActivityDate(e.target.value)} />
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Deskripsi (opsional)</div>
-            <Input
-              placeholder="Deskripsi singkat kegiatan"
-              value={activityDescription}
-              onChange={(e) => setActivityDescription(e.target.value)}
-            />
-          </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" onClick={() => setOpenAddActivity(false)}>Batal</Button>
-            <Button onClick={handleAddActivity} disabled={!activityName.trim()}>Simpan</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal hapus kegiatan */}
-      <Modal 
-        open={openDeleteActivity} 
-        title="Hapus Kegiatan" 
-        onClose={() => {
-          setOpenDeleteActivity(false)
-          setDeleteActivityId(null)
-          setDeleteActivityName('')
-          setDeleteConfirmText('')
-        }}
-      >
-        <div className="grid gap-4">
-          <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 p-3">
-            <div className="flex gap-2">
-              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-rose-600 dark:text-rose-400 shrink-0">
-                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
-                <line x1="12" y1="9" x2="12" y2="13"></line>
-                <line x1="12" y1="17" x2="12.01" y2="17"></line>
-              </svg>
-              <div className="text-sm text-rose-700 dark:text-rose-400">
-                <div className="font-semibold mb-1">Peringatan!</div>
-                <div>Tindakan ini akan menghapus kegiatan <span className="font-semibold">"{deleteActivityName}"</span> beserta seluruh data absensi dan sesi yang terkait. Tindakan ini tidak dapat dibatalkan.</div>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 text-sm font-medium text-slate-700 dark:text-slate-300">
-              Untuk konfirmasi, ketik nama kegiatan: <span className="font-semibold text-slate-900 dark:text-white">{deleteActivityName}</span>
-            </div>
-            <Input
-              placeholder="Ketik nama kegiatan"
-              value={deleteConfirmText}
-              onChange={(e) => setDeleteConfirmText(e.target.value)}
-              autoFocus
-            />
-          </div>
-
-          <div className="flex justify-end gap-2 pt-1">
-            <Button 
-              variant="secondary" 
-              onClick={() => {
-                setOpenDeleteActivity(false)
-                setDeleteActivityId(null)
-                setDeleteActivityName('')
-                setDeleteConfirmText('')
-              }}
-            >
-              Batal
-            </Button>
-            <button
-              type="button"
-              onClick={confirmDeleteActivity}
-              disabled={deleteConfirmText !== deleteActivityName}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
-                deleteConfirmText === deleteActivityName
-                  ? 'bg-rose-600 text-white hover:bg-rose-700'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500 cursor-not-allowed'
-              }`}
-            >
-              Hapus Kegiatan
-            </button>
-          </div>
-        </div>
-      </Modal>
-    </div>
+    </>
   )
 }
