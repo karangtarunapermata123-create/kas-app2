@@ -1577,19 +1577,66 @@ export async function getOrGenerateSessionQRToken(
 }
 
 // Validasi QR token dan return activity/session info
-export async function validateQRToken(token: string): Promise<{
+export async function validateQRToken(
+  token: string,
+  expectedTarget?: {
+    type?: "activity" | "session";
+    activityId?: string;
+    sessionId?: string;
+  },
+): Promise<{
   type: "activity" | "session";
   activityId: string;
   sessionId?: string;
   activityName: string;
   sessionLabel?: string;
 } | null> {
-  // Cek di activities dulu
+  if (expectedTarget?.type === "activity" && expectedTarget.activityId) {
+    const { data: activityData } = await supabase
+      .from("activities")
+      .select("id, name")
+      .eq("id", expectedTarget.activityId)
+      .eq("qr_token", token)
+      .maybeSingle();
+
+    if (activityData) {
+      return {
+        type: "activity",
+        activityId: activityData.id,
+        activityName: activityData.name,
+      };
+    }
+
+    return null;
+  }
+
+  if (expectedTarget?.type === "session" && expectedTarget.sessionId) {
+    const { data: sessionData } = await supabase
+      .from("activity_sessions")
+      .select("id, activity_id, label, activities(name)")
+      .eq("id", expectedTarget.sessionId)
+      .eq("qr_token", token)
+      .maybeSingle();
+
+    if (sessionData) {
+      return {
+        type: "session",
+        activityId: sessionData.activity_id,
+        sessionId: sessionData.id,
+        activityName: (sessionData.activities as any)?.name ?? "Unknown",
+        sessionLabel: sessionData.label,
+      };
+    }
+
+    return null;
+  }
+
+  // Backward compatibility untuk QR lama yang hanya berisi token
   const { data: activityData } = await supabase
     .from("activities")
     .select("id, name, type")
     .eq("qr_token", token)
-    .single();
+    .maybeSingle();
 
   if (activityData) {
     return {
@@ -1599,12 +1646,11 @@ export async function validateQRToken(token: string): Promise<{
     };
   }
 
-  // Cek di sessions
   const { data: sessionData } = await supabase
     .from("activity_sessions")
     .select("id, activity_id, label, activities(name)")
     .eq("qr_token", token)
-    .single();
+    .maybeSingle();
 
   if (sessionData) {
     return {
@@ -1623,12 +1669,17 @@ export async function validateQRToken(token: string): Promise<{
 export async function attendViaQR(
   token: string,
   memberName: string,
+  expectedTarget?: {
+    type?: "activity" | "session";
+    activityId?: string;
+    sessionId?: string;
+  },
 ): Promise<{
   success: boolean;
   message: string;
   record?: AttendanceRecord;
 }> {
-  const validation = await validateQRToken(token);
+  const validation = await validateQRToken(token, expectedTarget);
 
   if (!validation) {
     return {

@@ -823,7 +823,16 @@ export default function AbsensiPage() {
 
       // Generate URL dengan base URL dari window.location
       const baseUrl = window.location.origin;
-      const qrUrl = `${baseUrl}/absensi/scan?token=${token}`;
+      const params = new URLSearchParams({ token });
+      if (sessionId && selectedSession) {
+        params.set("type", "session");
+        params.set("sessionId", sessionId);
+        params.set("activityId", selectedActivity?.id ?? "");
+      } else if (activityId && selectedActivity) {
+        params.set("type", "activity");
+        params.set("activityId", activityId);
+      }
+      const qrUrl = `${baseUrl}/absensi/scan?${params.toString()}`;
 
       setQrData(qrUrl);
       setOpenQRDisplay(true);
@@ -835,11 +844,29 @@ export default function AbsensiPage() {
 
   async function handleScanQR(data: string) {
     try {
-      // Extract token from URL or use data directly
+      // Extract token and target info from URL or use raw token directly
       let token = data;
+      let expectedTarget:
+        | {
+            type?: "activity" | "session";
+            activityId?: string;
+            sessionId?: string;
+          }
+        | undefined;
+
       if (data.includes("token=")) {
         const url = new URL(data);
         token = url.searchParams.get("token") || data;
+        const type = url.searchParams.get("type");
+        const activityId = url.searchParams.get("activityId") || undefined;
+        const sessionId = url.searchParams.get("sessionId") || undefined;
+        if (type === "activity" || type === "session") {
+          expectedTarget = {
+            type,
+            activityId,
+            sessionId,
+          };
+        }
       }
 
       if (!profile?.full_name) {
@@ -847,7 +874,11 @@ export default function AbsensiPage() {
         return;
       }
 
-      const result = await attendViaQR(token, profile.full_name);
+      const result = await attendViaQR(
+        token,
+        profile.full_name,
+        expectedTarget,
+      );
 
       if (result.success) {
         setQrMessage({ type: "success", text: result.message });
@@ -1337,7 +1368,16 @@ export default function AbsensiPage() {
                                           session.id,
                                         );
                                       const baseUrl = window.location.origin;
-                                      const qrUrl = `${baseUrl}/absensi/scan?token=${token}`;
+                                      const params = new URLSearchParams({
+                                        token,
+                                      });
+                                      params.set("type", "session");
+                                      params.set("sessionId", session.id);
+                                      params.set(
+                                        "activityId",
+                                        selectedActivity.id,
+                                      );
+                                      const qrUrl = `${baseUrl}/absensi/scan?${params.toString()}`;
                                       setQrData(qrUrl);
                                       setOpenQRDisplay(true);
                                     } catch (error) {
