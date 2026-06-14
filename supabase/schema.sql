@@ -36,8 +36,11 @@ create trigger on_auth_user_created
 create table if not exists public.books (
   id          text primary key,
   name        text not null,
-  type        text not null default 'biasa' check (type in ('biasa', 'rutin')),
-  created_at  timestamptz not null default now()
+  type        text not null default 'biasa' check (type in ('biasa', 'rutin', 'kolektif', 'group')),
+  group_id    text references public.books(id) on delete set null,
+  created_at  timestamptz not null default now(),
+  constraint books_group_no_self_check check (group_id is null or group_id <> id),
+  constraint books_group_type_check check (type <> 'group' or group_id is null)
 );
 
 -- ── Categories ───────────────────────────────────────────────

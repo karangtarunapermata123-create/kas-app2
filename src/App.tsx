@@ -1,172 +1,259 @@
-import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import AbsensiPage from './pages/AbsensiPage'
-import BukuKasPage from './pages/BukuKasPage'
-import PengaturanPage from './pages/PengaturanPage'
-import KelolaUserPage from './pages/KelolaUserPage'
-import ProfilPage from './pages/ProfilPage'
-import RoutineBookPage from './pages/RoutineBookPage'
-import KolektifPage from './pages/KolektifPage'
-import KolektifSessionPage from './pages/KolektifSessionPage'
-import LoginPage from './pages/LoginPage'
-import RequireAuth from './components/RequireAuth'
-import { getActivities, getBooks, getSessionsByActivity } from './lib/store'
-import { useAuth } from './lib/auth'
+import {
+  NavLink,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import { useState, useEffect } from "react";
+import AbsensiPage from "./pages/AbsensiPage";
+import BukuKasPage from "./pages/BukuKasPage";
+import PengaturanPage from "./pages/PengaturanPage";
+import KelolaUserPage from "./pages/KelolaUserPage";
+import ProfilPage from "./pages/ProfilPage";
+import RoutineBookPage from "./pages/RoutineBookPage";
+import KolektifPage from "./pages/KolektifPage";
+import KolektifSessionPage from "./pages/KolektifSessionPage";
+import LoginPage from "./pages/LoginPage";
+import BookGroupPage from "./pages/BookGroupPage";
+import RequireAuth from "./components/RequireAuth";
+import { getActivities, getBooks, getSessionsByActivity } from "./lib/store";
+import { useAuth } from "./lib/auth";
 
 const linkBase =
-  'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium'
+  "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium";
 
 function IconBook(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
     </svg>
-  )
+  );
 }
 
 function IconUsers(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
       <path d="M16 3.13a4 4 0 0 1 0 7.75" />
     </svg>
-  )
+  );
 }
 
 function IconSettings(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <circle cx="12" cy="12" r="3" />
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33h.03A1.65 1.65 0 0 0 9 3.09V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51h.03a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.03a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1Z" />
     </svg>
-  )
+  );
 }
 
 function IconMenu(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <path d="M4 7h16" />
       <path d="M4 12h16" />
       <path d="M4 17h16" />
     </svg>
-  )
+  );
 }
 
 function IconLogout(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
       <polyline points="16 17 21 12 16 7" />
       <line x1="21" y1="12" x2="9" y2="12" />
     </svg>
-  )
+  );
 }
 
 function IconUser(props: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
       <circle cx="12" cy="8" r="4" />
       <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
     </svg>
-  )
+  );
 }
 
-function AppShell() {
-  const location = useLocation()
-  const navigate = useNavigate()
-  const { profile, signOut: _signOut } = useAuth()
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
-  const [headerTitle, setHeaderTitle] = useState('Kas')
-  const [headerBackTo, setHeaderBackTo] = useState<string | undefined>(undefined)
+// ── App Shell ─────────────────────────────────────────────────────────────────
 
-  const path = location.pathname
-  const parts = path.split('/').filter(Boolean)
-  const bookId = parts[0] === 'buku-kas' ? parts[1] : undefined
+function AppShell() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { profile, signOut: _signOut } = useAuth();
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [headerTitle, setHeaderTitle] = useState("Kas");
+  const [headerBackTo, setHeaderBackTo] = useState<string | undefined>(
+    undefined,
+  );
+
+  const path = location.pathname;
+  const parts = path.split("/").filter(Boolean);
+  const isBookGroupRoute =
+    parts[0] === "buku-kas" && parts[1] === "group" && Boolean(parts[2]);
+  const bookId =
+    parts[0] === "buku-kas" && parts[1] !== "group" ? parts[1] : undefined;
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     async function computeHeader() {
-      let title = 'Kas'
-      let backTo: string | undefined = undefined
+      let title = "Kas";
+      let backTo: string | undefined = undefined;
 
-      if (parts[0] === 'buku-kas' && bookId) {
-        if (parts[2] === 'transaksi') {
-          title = 'Transaksi Tunai'
-          backTo = `/buku-kas/${bookId}`
-        } else if (parts[2] === 'transaksi-rekening') {
-          title = 'Transaksi Rekening'
-          backTo = `/buku-kas/${bookId}`
+      const resolveBookBackTo = (
+        books: Awaited<ReturnType<typeof getBooks>>,
+        targetBookId: string,
+      ) => {
+        const parentGroupId = books.find((b) => b.id === targetBookId)?.groupId;
+        return parentGroupId ? `/buku-kas/group/${parentGroupId}` : "/buku-kas";
+      };
+
+      if (isBookGroupRoute && parts[2]) {
+        const books = await getBooks();
+        title = books.find((b) => b.id === parts[2])?.name ?? "Grup buku kas";
+        backTo = "/buku-kas";
+      } else if (parts[0] === "buku-kas" && bookId) {
+        const books = await getBooks();
+        if (parts[2] === "transaksi") {
+          title = "Transaksi Tunai";
+          backTo = `/buku-kas/${bookId}`;
+        } else if (parts[2] === "transaksi-rekening") {
+          title = "Transaksi Rekening";
+          backTo = `/buku-kas/${bookId}`;
         } else {
-          const books = await getBooks()
-          title = books.find((b) => b.id === bookId)?.name ?? 'Buku kas'
-          backTo = '/buku-kas'
+          title = books.find((b) => b.id === bookId)?.name ?? "Buku kas";
+          backTo = resolveBookBackTo(books, bookId);
         }
-      } else if (parts[0] === 'buku-kas-rutin' && parts[1]) {
-        const books = await getBooks()
-        title = books.find((b) => b.id === parts[1])?.name ?? 'Buku kas rutin'
-        backTo = '/buku-kas'
-      } else if (parts[0] === 'buku-kas-kolektif' && parts[1] && parts[2] === 'sesi' && parts[3]) {
-        const books = await getBooks()
-        title = books.find((b) => b.id === parts[1])?.name ?? 'Buku Kolektif'
-        backTo = `/buku-kas-kolektif/${parts[1]}`
-      } else if (parts[0] === 'buku-kas-kolektif' && parts[1]) {
-        const books = await getBooks()
-        title = books.find((b) => b.id === parts[1])?.name ?? 'Buku Kolektif'
-        backTo = '/buku-kas'
-      } else if (parts[0] === 'buku-kas') {
-        title = 'Buku kas'
-      } else if (parts[0] === 'absensi' && parts[1] && parts[2] === 'sesi' && parts[3]) {
-        const sessions = await getSessionsByActivity(parts[1])
-        title = sessions.find((s) => s.id === parts[3])?.label ?? 'Sesi'
-        backTo = `/absensi/${parts[1]}`
-      } else if (parts[0] === 'absensi' && parts[1]) {
-        const activities = await getActivities()
-        title = activities.find((a) => a.id === parts[1])?.name ?? 'Detail Kegiatan'
-        backTo = '/absensi'
-      } else if (parts[0] === 'absensi') {
-        title = 'Absensi'
-      } else if (parts[0] === 'pengaturan') {
-        title = 'Pengaturan'
-      } else if (parts[0] === 'kelola-user') {
-        title = 'Kelola User'
-        backTo = '/pengaturan'
-      } else if (parts[0] === 'profil') {
-        title = 'Profil'
+      } else if (parts[0] === "buku-kas-rutin" && parts[1]) {
+        const books = await getBooks();
+        title = books.find((b) => b.id === parts[1])?.name ?? "Buku kas rutin";
+        backTo = resolveBookBackTo(books, parts[1]);
+      } else if (
+        parts[0] === "buku-kas-kolektif" &&
+        parts[1] &&
+        parts[2] === "sesi" &&
+        parts[3]
+      ) {
+        const books = await getBooks();
+        title = books.find((b) => b.id === parts[1])?.name ?? "Buku Kolektif";
+        backTo = `/buku-kas-kolektif/${parts[1]}`;
+      } else if (parts[0] === "buku-kas-kolektif" && parts[1]) {
+        const books = await getBooks();
+        title = books.find((b) => b.id === parts[1])?.name ?? "Buku Kolektif";
+        backTo = resolveBookBackTo(books, parts[1]);
+      } else if (parts[0] === "buku-kas") {
+        title = "Buku kas";
+      } else if (
+        parts[0] === "absensi" &&
+        parts[1] &&
+        parts[2] === "sesi" &&
+        parts[3]
+      ) {
+        const sessions = await getSessionsByActivity(parts[1]);
+        title = sessions.find((s) => s.id === parts[3])?.label ?? "Sesi";
+        backTo = `/absensi/${parts[1]}`;
+      } else if (parts[0] === "absensi" && parts[1]) {
+        const activities = await getActivities();
+        title =
+          activities.find((a) => a.id === parts[1])?.name ?? "Detail Kegiatan";
+        backTo = "/absensi";
+      } else if (parts[0] === "absensi") {
+        title = "Absensi";
+      } else if (parts[0] === "pengaturan") {
+        title = "Pengaturan";
+      } else if (parts[0] === "kelola-user") {
+        title = "Kelola User";
+        backTo = "/pengaturan";
+      } else if (parts[0] === "profil") {
+        title = "Profil";
       }
 
       if (!cancelled) {
-        setHeaderTitle(title)
-        setHeaderBackTo(backTo)
+        setHeaderTitle(title);
+        setHeaderBackTo(backTo);
       }
     }
-    computeHeader()
-    return () => { cancelled = true }
-  }, [path])
+    computeHeader();
+    return () => {
+      cancelled = true;
+    };
+  }, [path]);
 
   const navLinkClass = (isActive: boolean) =>
     `flex items-center w-full rounded-lg text-sm font-medium transition-[padding,gap] duration-300 ease-in-out ${
       isSidebarCollapsed
-        ? 'justify-center gap-0 px-0 py-2'
-        : 'justify-start gap-2 px-3 py-2'
-    } ${isActive ? 'bg-slate-900 dark:bg-slate-700 text-white' : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'}`
+        ? "justify-center gap-0 px-0 py-2"
+        : "justify-start gap-2 px-3 py-2"
+    } ${isActive ? "bg-slate-900 dark:bg-slate-700 text-white" : "text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`;
 
-  const collapseButtonClass =
-    `flex items-center w-full rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-[padding,gap] duration-300 ease-in-out ${
-      isSidebarCollapsed
-        ? 'justify-center gap-0 px-0 py-2'
-        : 'justify-start gap-2 px-3 py-2'
-    }`
+  const collapseButtonClass = `flex items-center w-full rounded-lg text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-[padding,gap] duration-300 ease-in-out ${
+    isSidebarCollapsed
+      ? "justify-center gap-0 px-0 py-2"
+      : "justify-start gap-2 px-3 py-2"
+  }`;
 
   const spanClass = `overflow-hidden whitespace-nowrap transition-[max-width,opacity,transform,margin] duration-300 ease-in-out ${
     isSidebarCollapsed
-      ? 'max-w-0 opacity-0 -translate-x-1 ml-0'
-      : 'max-w-[12rem] opacity-100 translate-x-0 ml-2'
-  }`
+      ? "max-w-0 opacity-0 -translate-x-1 ml-0"
+      : "max-w-[12rem] opacity-100 translate-x-0 ml-2"
+  }`;
 
-  const header = { title: headerTitle, backTo: headerBackTo }
+  const header = { title: headerTitle, backTo: headerBackTo };
 
   return (
     <div className="min-h-full">
@@ -174,19 +261,31 @@ function AppShell() {
         {/* Sidebar desktop */}
         <aside
           className={`hidden shrink-0 overflow-hidden border-r bg-slate-50 dark:bg-slate-900 dark:border-slate-800 transition-[width] duration-300 ease-in-out md:flex md:flex-col ${
-            isSidebarCollapsed ? 'w-14' : 'w-48'
+            isSidebarCollapsed ? "w-14" : "w-48"
           }`}
         >
           <nav className="flex-1 space-y-1 px-2 pt-4">
-            <NavLink to="/buku-kas" className={({ isActive }) => navLinkClass(isActive)} title="Buku kas">
+            <NavLink
+              to="/buku-kas"
+              className={({ isActive }) => navLinkClass(isActive)}
+              title="Buku kas"
+            >
               <IconBook className="h-5 w-5 shrink-0" />
               <span className={spanClass}>Buku kas</span>
             </NavLink>
-            <NavLink to="/absensi" className={({ isActive }) => navLinkClass(isActive)} title="Absensi">
+            <NavLink
+              to="/absensi"
+              className={({ isActive }) => navLinkClass(isActive)}
+              title="Absensi"
+            >
               <IconUsers className="h-5 w-5 shrink-0" />
               <span className={spanClass}>Absensi</span>
             </NavLink>
-            <NavLink to="/profil" className={({ isActive }) => navLinkClass(isActive)} title="Profil">
+            <NavLink
+              to="/profil"
+              className={({ isActive }) => navLinkClass(isActive)}
+              title="Profil"
+            >
               <IconUser className="h-5 w-5 shrink-0" />
               <span className={spanClass}>Profil</span>
             </NavLink>
@@ -194,7 +293,11 @@ function AppShell() {
 
           <div className="px-2 pb-4 space-y-1">
             {/* Pengaturan */}
-            <NavLink to="/pengaturan" className={({ isActive }) => navLinkClass(isActive)} title="Pengaturan">
+            <NavLink
+              to="/pengaturan"
+              className={({ isActive }) => navLinkClass(isActive)}
+              title="Pengaturan"
+            >
               <IconSettings className="h-5 w-5 shrink-0" />
               <span className={spanClass}>Pengaturan</span>
             </NavLink>
@@ -203,12 +306,14 @@ function AppShell() {
               type="button"
               className={collapseButtonClass}
               onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-              aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              aria-label={
+                isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"
+              }
+              title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               <IconMenu className="h-5 w-5 shrink-0" />
               <span className={spanClass}>
-                {isSidebarCollapsed ? 'Expand' : 'Collapse'}
+                {isSidebarCollapsed ? "Expand" : "Collapse"}
               </span>
             </button>
           </div>
@@ -218,7 +323,9 @@ function AppShell() {
           {/* Header mobile */}
           <header className="sticky top-0 z-30 border-b bg-white dark:bg-slate-900 dark:border-slate-800 md:hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 text-lg font-bold text-slate-900 dark:text-white truncate">{header.title}</div>
+              <div className="min-w-0 text-lg font-bold text-slate-900 dark:text-white truncate">
+                {header.title}
+              </div>
               <div className="flex items-center gap-2 shrink-0">
                 {header.backTo ? (
                   <button
@@ -234,7 +341,9 @@ function AppShell() {
                   title="Pengaturan"
                   className={({ isActive }) =>
                     `inline-flex h-9 w-9 items-center justify-center rounded-lg border dark:border-slate-700 transition ${
-                      isActive ? 'bg-slate-900 dark:bg-slate-700 text-white border-slate-900 dark:border-slate-700' : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700'
+                      isActive
+                        ? "bg-slate-900 dark:bg-slate-700 text-white border-slate-900 dark:border-slate-700"
+                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
                     }`
                   }
                 >
@@ -246,7 +355,9 @@ function AppShell() {
 
           {/* Header desktop */}
           <header className="sticky top-0 z-30 hidden border-b bg-white dark:bg-slate-900 dark:border-slate-800 md:flex md:items-center md:justify-between px-6 py-3">
-            <div className="text-base font-semibold text-slate-900 dark:text-white">{header.title}</div>
+            <div className="text-base font-semibold text-slate-900 dark:text-white">
+              {header.title}
+            </div>
             <div className="flex items-center gap-2">
               {header.backTo ? (
                 <button
@@ -264,15 +375,37 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to="/buku-kas" replace />} />
               <Route path="/buku-kas" element={<BukuKasPage />} />
+              <Route
+                path="/buku-kas/group/:groupId"
+                element={<BookGroupPage />}
+              />
               <Route path="/buku-kas/:bookId" element={<BukuKasPage />} />
-              <Route path="/buku-kas/:bookId/transaksi" element={<BukuKasPage />} />
-              <Route path="/buku-kas/:bookId/transaksi-rekening" element={<BukuKasPage />} />
-              <Route path="/buku-kas-rutin/:bookId" element={<RoutineBookPage />} />
-              <Route path="/buku-kas-kolektif/:bookId" element={<KolektifPage />} />
-              <Route path="/buku-kas-kolektif/:bookId/sesi/:sessionId" element={<KolektifSessionPage />} />
+              <Route
+                path="/buku-kas/:bookId/transaksi"
+                element={<BukuKasPage />}
+              />
+              <Route
+                path="/buku-kas/:bookId/transaksi-rekening"
+                element={<BukuKasPage />}
+              />
+              <Route
+                path="/buku-kas-rutin/:bookId"
+                element={<RoutineBookPage />}
+              />
+              <Route
+                path="/buku-kas-kolektif/:bookId"
+                element={<KolektifPage />}
+              />
+              <Route
+                path="/buku-kas-kolektif/:bookId/sesi/:sessionId"
+                element={<KolektifSessionPage />}
+              />
               <Route path="/absensi" element={<AbsensiPage />} />
               <Route path="/absensi/:activityId" element={<AbsensiPage />} />
-              <Route path="/absensi/:activityId/sesi/:sessionId" element={<AbsensiPage />} />
+              <Route
+                path="/absensi/:activityId/sesi/:sessionId"
+                element={<AbsensiPage />}
+              />
               <Route path="/pengaturan" element={<PengaturanPage />} />
               <Route path="/kelola-user" element={<KelolaUserPage />} />
               <Route path="/profil" element={<ProfilPage />} />
@@ -288,10 +421,20 @@ function AppShell() {
               >
                 {({ isActive }) => (
                   <>
-                    <span className={isActive ? 'grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10' : 'grid h-9 w-9 place-items-center rounded-full'}>
-                      <IconBook className={`h-5 w-5 ${isActive ? 'text-black dark:text-white' : 'text-slate-400 dark:text-slate-500'}`} />
+                    <span
+                      className={
+                        isActive
+                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
+                          : "grid h-9 w-9 place-items-center rounded-full"
+                      }
+                    >
+                      <IconBook
+                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
+                      />
                     </span>
-                    <span className="text-slate-500 dark:text-slate-400">Kas</span>
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Kas
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -301,10 +444,20 @@ function AppShell() {
               >
                 {({ isActive }) => (
                   <>
-                    <span className={isActive ? 'grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10' : 'grid h-9 w-9 place-items-center rounded-full'}>
-                      <IconUsers className={`h-5 w-5 ${isActive ? 'text-black dark:text-white' : 'text-slate-400 dark:text-slate-500'}`} />
+                    <span
+                      className={
+                        isActive
+                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
+                          : "grid h-9 w-9 place-items-center rounded-full"
+                      }
+                    >
+                      <IconUsers
+                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
+                      />
                     </span>
-                    <span className="text-slate-500 dark:text-slate-400">Absensi</span>
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Absensi
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -314,10 +467,20 @@ function AppShell() {
               >
                 {({ isActive }) => (
                   <>
-                    <span className={isActive ? 'grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10' : 'grid h-9 w-9 place-items-center rounded-full'}>
-                      <IconUser className={`h-5 w-5 ${isActive ? 'text-black dark:text-white' : 'text-slate-400 dark:text-slate-500'}`} />
+                    <span
+                      className={
+                        isActive
+                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
+                          : "grid h-9 w-9 place-items-center rounded-full"
+                      }
+                    >
+                      <IconUser
+                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
+                      />
                     </span>
-                    <span className="text-slate-500 dark:text-slate-400">Profil</span>
+                    <span className="text-slate-500 dark:text-slate-400">
+                      Profil
+                    </span>
                   </>
                 )}
               </NavLink>
@@ -326,7 +489,7 @@ function AppShell() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 export default function App() {
@@ -342,5 +505,5 @@ export default function App() {
         }
       />
     </Routes>
-  )
+  );
 }
