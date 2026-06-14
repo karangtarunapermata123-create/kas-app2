@@ -809,12 +809,12 @@ export default function AbsensiPage() {
 
       if (sessionId && selectedSession) {
         // QR untuk sesi
-        token = await getOrGenerateSessionQRToken(sessionId);
+        token = await getOrGenerateSessionQRToken(sessionId, true);
         title = `QR Absensi - ${selectedSession.label}`;
         description = `${selectedActivity?.name} - ${selectedSession.label}`;
       } else if (activityId && selectedActivity) {
         // QR untuk activity
-        token = await getOrGenerateActivityQRToken(activityId);
+        token = await getOrGenerateActivityQRToken(activityId, true);
         title = `QR Absensi - ${selectedActivity.name}`;
         description = selectedActivity.name;
       } else {
@@ -881,13 +881,33 @@ export default function AbsensiPage() {
       );
 
       if (result.success) {
+        console.log("[handleScanQR] success", {
+          scannedPayload: data,
+          token,
+          expectedTarget,
+          result,
+        });
         setQrMessage({ type: "success", text: result.message });
         // Close scanner modal on success
         setOpenQRScanner(false);
+        if (result.record) {
+          setRecords((prev) => {
+            const filtered = prev.filter(
+              (item) =>
+                !(
+                  item.activityId === result.record?.activityId &&
+                  item.sessionId === result.record?.sessionId &&
+                  item.memberName.toLowerCase().trim() ===
+                    result.record.memberName.toLowerCase().trim()
+                ),
+            );
+            return [...filtered, result.record!];
+          });
+        }
         await loadRecords();
         // Reload activities stats
-        const data = await getActivities();
-        setActivities(data);
+        const activitiesData = await getActivities();
+        setActivities(activitiesData);
         // Clear success message after 4 seconds
         setTimeout(() => setQrMessage(null), 4000);
       } else {
@@ -1366,6 +1386,7 @@ export default function AbsensiPage() {
                                       const token =
                                         await getOrGenerateSessionQRToken(
                                           session.id,
+                                          true,
                                         );
                                       const baseUrl = window.location.origin;
                                       const params = new URLSearchParams({

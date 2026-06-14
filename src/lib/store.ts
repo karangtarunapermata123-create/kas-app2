@@ -1525,6 +1525,7 @@ function generateQRToken(): string {
 // Generate atau ambil QR token untuk activity (kegiatan sekali)
 export async function getOrGenerateActivityQRToken(
   activityId: string,
+  forceRefresh = false,
 ): Promise<string> {
   const { data, error } = await supabase
     .from("activities")
@@ -1534,7 +1535,7 @@ export async function getOrGenerateActivityQRToken(
 
   if (error) throw error;
 
-  if (data.qr_token) {
+  if (!forceRefresh && data.qr_token) {
     return data.qr_token;
   }
 
@@ -1552,6 +1553,7 @@ export async function getOrGenerateActivityQRToken(
 // Generate atau ambil QR token untuk session (kegiatan rutin)
 export async function getOrGenerateSessionQRToken(
   sessionId: string,
+  forceRefresh = false,
 ): Promise<string> {
   const { data, error } = await supabase
     .from("activity_sessions")
@@ -1561,7 +1563,7 @@ export async function getOrGenerateSessionQRToken(
 
   if (error) throw error;
 
-  if (data.qr_token) {
+  if (!forceRefresh && data.qr_token) {
     return data.qr_token;
   }
 
@@ -1721,6 +1723,13 @@ export async function attendViaQR(
     memberName,
     status: "hadir",
     note: "Absen via QR code",
+  });
+
+  console.log("[attendViaQR] success", {
+    token,
+    expectedTarget,
+    validation,
+    record,
   });
 
   return {
