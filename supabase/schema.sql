@@ -66,10 +66,12 @@ create table if not exists public.transactions (
 
 -- ── Routine Members ──────────────────────────────────────────
 create table if not exists public.routine_members (
-  id          text primary key,
-  book_id     text not null references public.books(id) on delete cascade,
-  name        text not null,
-  created_at  timestamptz not null default now()
+  id            text primary key,
+  book_id       text not null references public.books(id) on delete cascade,
+  name          text not null,
+  joins_kas     boolean not null default true,
+  joins_arisan  boolean not null default true,
+  created_at    timestamptz not null default now()
 );
 
 -- ── Routine Categories ───────────────────────────────────────
@@ -108,6 +110,34 @@ create table if not exists public.routine_sessions (
   name        text not null,
   created_at  timestamptz not null default now()
 );
+
+-- ── Routine Cash Entries ─────────────────────────────────────
+create table if not exists public.routine_cash_entries (
+  id          text primary key,
+  book_id     text not null references public.books(id) on delete cascade,
+  date        text not null,
+  type        text not null check (type in ('masuk', 'keluar')),
+  amount      bigint not null default 0,
+  note        text not null default '',
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_routine_cash_entries_book_date
+on public.routine_cash_entries(book_id, date desc, created_at desc);
+
+-- ── Routine Arisan Entries ───────────────────────────────────
+create table if not exists public.routine_arisan_entries (
+  id          text primary key,
+  book_id     text not null references public.books(id) on delete cascade,
+  scope_type  text not null check (scope_type in ('year', 'session')),
+  scope_key   text not null,
+  name        text not null,
+  amount      bigint not null default 0,
+  created_at  timestamptz not null default now()
+);
+
+create index if not exists idx_routine_arisan_entries_scope
+on public.routine_arisan_entries(book_id, scope_type, scope_key, created_at);
 
 -- ── Activities ───────────────────────────────────────────────
 create table if not exists public.activities (
@@ -153,6 +183,8 @@ alter table public.routine_categories enable row level security;
 alter table public.routine_checklists enable row level security;
 alter table public.routine_frequency enable row level security;
 alter table public.routine_sessions enable row level security;
+alter table public.routine_cash_entries enable row level security;
+alter table public.routine_arisan_entries enable row level security;
 alter table public.activities enable row level security;
 alter table public.activity_sessions enable row level security;
 alter table public.attendance_records enable row level security;
@@ -174,6 +206,8 @@ create policy "routine_categories_all" on public.routine_categories for all to a
 create policy "routine_checklists_all" on public.routine_checklists for all to authenticated using (true) with check (true);
 create policy "routine_frequency_all" on public.routine_frequency for all to authenticated using (true) with check (true);
 create policy "routine_sessions_all" on public.routine_sessions for all to authenticated using (true) with check (true);
+create policy "routine_cash_entries_all" on public.routine_cash_entries for all to authenticated using (true) with check (true);
+create policy "routine_arisan_entries_all" on public.routine_arisan_entries for all to authenticated using (true) with check (true);
 create policy "activities_all" on public.activities for all to authenticated using (true) with check (true);
 create policy "activity_sessions_all" on public.activity_sessions for all to authenticated using (true) with check (true);
 create policy "attendance_records_all" on public.attendance_records for all to authenticated using (true) with check (true);

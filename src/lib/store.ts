@@ -7,6 +7,9 @@ import type {
   TxType,
   RoutineMember,
   RoutineCategory,
+  RoutineCashEntry,
+  RoutineArisanEntry,
+  RoutineArisanEntryScope,
   RoutineChecklist,
   RoutineFrequency,
   RoutineSession,
@@ -308,23 +311,43 @@ export async function getBookSaldo(book: Book): Promise<number> {
   if (book.type === "group") return 0;
 
   if (book.type === "rutin") {
-    const [frequency, categories, sessions, checklists] = await Promise.all([
+    const [
+      frequency,
+      categories,
+      sessions,
+      checklists,
+      cashEntries,
+      arisanEntries,
+    ] = await Promise.all([
       getRoutineFrequency(book.id),
       getRoutineCategories(book.id),
       getRoutineSessions(book.id),
       getRoutineChecklists(book.id),
+      getRoutineCashEntries(book.id),
+      getRoutineArisanEntries(book.id),
     ]);
+
+    const cashSaldo = cashEntries.reduce(
+      (acc, entry) =>
+        acc + (entry.type === "masuk" ? entry.amount : -entry.amount),
+      0,
+    );
+    const arisanUsedTotal = arisanEntries.reduce(
+      (acc, entry) => acc + entry.amount,
+      0,
+    );
 
     if (frequency === "bulanan") {
       const amountByCategoryId = new Map(
         categories.map((c) => [c.id, c.amount]),
       );
-      return checklists.reduce((acc, item) => {
+      const checklistSaldo = checklists.reduce((acc, item) => {
         if (!item.checked || item.notPaid || item.transferred) return acc;
         const count = item.count ?? 1;
         const amount = amountByCategoryId.get(item.categoryId) ?? 0;
         return acc + count * amount;
       }, 0);
+      return checklistSaldo + cashSaldo - arisanUsedTotal;
     }
 
     const amountByCategoryId = new Map<string, number>();
@@ -334,12 +357,14 @@ export async function getBookSaldo(book: Book): Promise<number> {
       }
     }
 
-    return checklists.reduce((acc, item) => {
+    const checklistSaldo = checklists.reduce((acc, item) => {
       if (!item.checked || item.notPaid || item.transferred) return acc;
       const count = item.count ?? 1;
       const amount = amountByCategoryId.get(item.categoryId) ?? 0;
       return acc + count * amount;
     }, 0);
+
+    return checklistSaldo + cashSaldo - arisanUsedTotal;
   }
 
   if (book.type === "kolektif") {
@@ -436,7 +461,12 @@ export async function getRoutineMembers(
     .eq("book_id", bookId)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((m) => ({ id: m.id, name: m.name }));
+  return (data ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    joinsKas: m.joins_kas ?? true,
+    joinsArisan: m.joins_arisan ?? true,
+  }));
 }
 
 export async function saveRoutineMembers(
@@ -450,6 +480,8 @@ export async function saveRoutineMembers(
     id: m.id,
     book_id: bookId,
     name: m.name,
+    joins_kas: m.joinsKas ?? true,
+    joins_arisan: m.joinsArisan ?? true,
   }));
   const { error } = await supabase.from("routine_members").insert(rows);
   if (error) throw error;
@@ -459,10 +491,19 @@ export async function addRoutineMember(
   bookId: string,
   name: string,
 ): Promise<RoutineMember> {
-  const m: RoutineMember = { id: uid("rm"), name: name.trim() };
-  const { error } = await supabase
-    .from("routine_members")
-    .insert({ id: m.id, book_id: bookId, name: m.name });
+  const m: RoutineMember = {
+    id: uid("rm"),
+    name: name.trim(),
+    joinsKas: true,
+    joinsArisan: true,
+  };
+  const { error } = await supabase.from("routine_members").insert({
+    id: m.id,
+    book_id: bookId,
+    name: m.name,
+    joins_kas: true,
+    joins_arisan: true,
+  });
   if (error) throw error;
   return m;
 }
@@ -576,6 +617,134 @@ export async function updateRoutineCategory(
     .eq("id", categoryId)
     .eq("book_id", bookId);
   if (error) throw error;
+}
+
+// ─── Routine Cash Entries ─────────────────────────────────────────────────────
+
+export async function getRoutineCashEntries(
+  bookId: string,
+): Promise<RoutineCashEntry[]> {
+  const { data, error } = await supabase
+    .from("routine_cash_entries")
+    .select("*")
+    .eq("book_id", bookId)
+    .order("date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((entry) => ({
+    id: entry.id,
+    bookId: entry.book_id,
+    date: entry.date,
+    type: entry.type,
+    amount: entry.amount,
+    note: entry.note ?? "",
+    createdAt: entry.created_at ?? undefined,
+  }));
+}
+
+export async function addRoutineCashEntry(
+  bookId: string,
+  entry: Omit<RoutineCashEntry, "id" | "bookId" | "createdAt">,
+): Promise<RoutineCashEntry> {
+  const nextEntry: RoutineCashEntry = {
+    id: uid("rce"),
+    bookId,
+    date: entry.date,
+    type: entry.type,
+    amount: entry.amount,
+    note: entry.note,
+  };
+
+  const { error } = await supabase.from("routine_cash_entries").insert({
+    id: nextEntry.id,
+    book_id: bookId,
+    date: nextEntry.date,
+    type: nextEntry.type,
+    amount: nextEntry.amount,
+    note: nextEntry.note,
+  });
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
+  return nextEntry;
+}
+
+export async function deleteRoutineCashEntry(
+  bookId: string,
+  entryId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("routine_cash_entries")
+    .delete()
+    .eq("id", entryId)
+    .eq("book_id", bookId);
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
+}
+
+// ─── Routine Arisan Entries ───────────────────────────────────────────────────
+
+export async function getRoutineArisanEntries(
+  bookId: string,
+): Promise<RoutineArisanEntry[]> {
+  const { data, error } = await supabase
+    .from("routine_arisan_entries")
+    .select("*")
+    .eq("book_id", bookId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((item) => ({
+    id: item.id,
+    bookId: item.book_id,
+    scopeType: item.scope_type,
+    scopeKey: item.scope_key,
+    name: item.name,
+    amount: item.amount,
+    createdAt: item.created_at ?? undefined,
+  }));
+}
+
+export async function addRoutineArisanEntry(
+  bookId: string,
+  entry: {
+    scopeType: RoutineArisanEntryScope;
+    scopeKey: string;
+    name: string;
+    amount: number;
+  },
+): Promise<RoutineArisanEntry> {
+  const nextEntry: RoutineArisanEntry = {
+    id: uid("rae"),
+    bookId,
+    scopeType: entry.scopeType,
+    scopeKey: entry.scopeKey,
+    name: entry.name.trim(),
+    amount: entry.amount,
+  };
+
+  const { error } = await supabase.from("routine_arisan_entries").insert({
+    id: nextEntry.id,
+    book_id: bookId,
+    scope_type: nextEntry.scopeType,
+    scope_key: nextEntry.scopeKey,
+    name: nextEntry.name,
+    amount: nextEntry.amount,
+  });
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
+  return nextEntry;
+}
+
+export async function deleteRoutineArisanEntry(
+  bookId: string,
+  entryId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("routine_arisan_entries")
+    .delete()
+    .eq("id", entryId)
+    .eq("book_id", bookId);
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
 }
 
 // ─── Routine Checklists ───────────────────────────────────────────────────────

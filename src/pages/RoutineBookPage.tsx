@@ -8,10 +8,16 @@ import Modal from "../components/Modal";
 import SuccessModal from "../components/SuccessModal";
 import { useAuth, canEditBook } from "../lib/auth";
 import {
+  addRoutineArisanEntry,
+  addRoutineCashEntry,
   addRoutineSession,
+  deleteRoutineArisanEntry,
+  deleteRoutineCashEntry,
   deleteRoutineSession,
   deleteRoutineChecklist,
   getBooks,
+  getRoutineArisanEntries,
+  getRoutineCashEntries,
   getRoutineCategories,
   getRoutineChecklists,
   getRoutineFrequency,
@@ -24,11 +30,15 @@ import {
 } from "../lib/store";
 import type {
   Book,
+  RoutineArisanEntry,
+  RoutineArisanEntryScope,
+  RoutineCashEntry,
   RoutineCategory,
   RoutineChecklist,
   RoutineFrequency,
   RoutineMember,
   RoutineSession,
+  TxType,
 } from "../lib/types";
 import type { Profile } from "../lib/auth";
 import { getAllProfiles } from "../lib/users";
@@ -150,6 +160,12 @@ export default function RoutineBookPage() {
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedSessionMemberTypes, setSelectedSessionMemberTypes] = useState<
+    Record<string, { kas: boolean; arisan: boolean }>
+  >({});
+  const [sessionMemberSettingsTab, setSessionMemberSettingsTab] = useState<
+    "kas" | "arisan"
+  >("kas");
   const [availableSessionCategories, setAvailableSessionCategories] = useState<
     RoutineCategory[]
   >([]);
@@ -183,6 +199,40 @@ export default function RoutineBookPage() {
     periodKey: string;
   } | null>(null);
 
+  const [routineCashEntries, setRoutineCashEntries] = useState<
+    RoutineCashEntry[]
+  >([]);
+  const [routineArisanEntries, setRoutineArisanEntries] = useState<
+    RoutineArisanEntry[]
+  >([]);
+  const [openCashSaldoModal, setOpenCashSaldoModal] = useState(false);
+  const [openCashEntryModal, setOpenCashEntryModal] = useState(false);
+  const [openArisanStatusModal, setOpenArisanStatusModal] = useState(false);
+  const [openArisanEntryModal, setOpenArisanEntryModal] = useState(false);
+  const [arisanEntryForm, setArisanEntryForm] = useState({
+    name: "",
+    amount: "",
+  });
+  const [savingArisanEntry, setSavingArisanEntry] = useState(false);
+  const [deletingArisanEntryId, setDeletingArisanEntryId] = useState<
+    string | null
+  >(null);
+  const [cashEntryForm, setCashEntryForm] = useState<{
+    date: string;
+    type: TxType;
+    amount: string;
+    note: string;
+  }>({
+    date: todayISO(),
+    type: "masuk",
+    amount: "",
+    note: "",
+  });
+  const [savingCashEntry, setSavingCashEntry] = useState(false);
+  const [deletingCashEntryId, setDeletingCashEntryId] = useState<string | null>(
+    null,
+  );
+
   const refreshData = async () => {
     const [
       books,
@@ -191,6 +241,8 @@ export default function RoutineBookPage() {
       fetchedChecklists,
       fetchedSessions,
       fetchedFrequency,
+      fetchedCashEntries,
+      fetchedArisanEntries,
     ] = await Promise.all([
       getBooks(),
       getRoutineMembers(safeBookId),
@@ -198,6 +250,8 @@ export default function RoutineBookPage() {
       getRoutineChecklists(safeBookId),
       getRoutineSessions(safeBookId),
       getRoutineFrequency(safeBookId),
+      getRoutineCashEntries(safeBookId),
+      getRoutineArisanEntries(safeBookId),
     ]);
     setBook(books.find((b) => b.id === safeBookId));
     setMembers(fetchedMembers);
@@ -205,6 +259,8 @@ export default function RoutineBookPage() {
     setChecklists(fetchedChecklists);
     setSessions(fetchedSessions);
     setFrequency(fetchedFrequency);
+    setRoutineCashEntries(fetchedCashEntries);
+    setRoutineArisanEntries(fetchedArisanEntries);
   };
 
   useEffect(() => {
@@ -375,16 +431,29 @@ export default function RoutineBookPage() {
     const profiles = await getAllProfiles();
     setAllProfiles(profiles);
 
-    // Set selected dari session.members yang sudah ada
-    const existingNames = new Set(
-      (session.members || []).map((m) => m.name.trim().toLowerCase()),
+    const memberByName = new Map(
+      (session.members || []).map((m) => [m.name.trim().toLowerCase(), m]),
     );
     const selected = new Set(
       profiles
-        .filter((p) => existingNames.has(p.full_name.trim().toLowerCase()))
+        .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
+    const types = Object.fromEntries(
+      profiles.map((p) => {
+        const existing = memberByName.get(p.full_name.trim().toLowerCase());
+        return [
+          p.id,
+          {
+            kas: existing?.joinsKas ?? true,
+            arisan: existing?.joinsArisan ?? true,
+          },
+        ];
+      }),
+    );
     setSelectedProfileIds(selected);
+    setSelectedSessionMemberTypes(types);
+    setSessionMemberSettingsTab("kas");
     setEditingSessionId(sessionId);
     setOpenSessionMemberModal(true);
   }
@@ -399,17 +468,52 @@ export default function RoutineBookPage() {
       }
       return next;
     });
+    setSelectedSessionMemberTypes((prev) => ({
+      ...prev,
+      [profileId]: prev[profileId] ?? { kas: true, arisan: true },
+    }));
+  }
+
+  function toggleSessionMemberType(profileId: string, type: "kas" | "arisan") {
+    setSelectedSessionMemberTypes((prev) => {
+      const current = prev[profileId] ?? { kas: true, arisan: true };
+      const next = {
+        kas: type === "kas" ? !current.kas : current.kas,
+        arisan: type === "arisan" ? !current.arisan : current.arisan,
+      };
+      setSelectedProfileIds((prevIds) => {
+        const nextIds = new Set(prevIds);
+        if (next.kas || next.arisan) {
+          nextIds.add(profileId);
+        } else {
+          nextIds.delete(profileId);
+        }
+        return nextIds;
+      });
+      return {
+        ...prev,
+        [profileId]: next,
+      };
+    });
   }
 
   async function applySessionMembers() {
     if (!editingSessionId) return;
 
-    const selectedProfiles = allProfiles.filter((p) =>
-      selectedProfileIds.has(p.id),
+    const session = sessions.find((s) => s.id === editingSessionId);
+    const memberIdByName = new Map(
+      (session?.members || []).map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
+
+    const selectedProfiles = allProfiles.filter((p) => {
+      const types = selectedSessionMemberTypes[p.id];
+      return Boolean(types?.kas || types?.arisan);
+    });
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
-      id: uid("rm"),
+      id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
       name: p.full_name,
+      joinsKas: selectedSessionMemberTypes[p.id]?.kas ?? true,
+      joinsArisan: selectedSessionMemberTypes[p.id]?.arisan ?? true,
     }));
 
     await updateRoutineSession(safeBookId, editingSessionId, { members });
@@ -541,12 +645,27 @@ export default function RoutineBookPage() {
     return displayCategories.filter((c) => c.id === selectedCategoryId);
   }, [displayCategories, selectedCategoryId]);
 
+  const memberSupportsCategory = (
+    member: RoutineMember,
+    category: RoutineCategory,
+  ) => {
+    const normalized = category.name.trim().toLowerCase();
+    if (normalized.includes("arisan")) {
+      return member.joinsArisan !== false;
+    }
+    if (normalized.includes("kas")) {
+      return member.joinsKas !== false;
+    }
+    return true;
+  };
+
   const periodCount = frequency === "bulanan" ? 12 : displayMembers.length;
 
   const totals = useMemo(() => {
     let total = 0;
     for (const member of displayMembers) {
       for (const category of displayCategories) {
+        if (!memberSupportsCategory(member, category)) continue;
         for (let p = 0; p < periodCount; p++) {
           const periodKey =
             frequency === "bulanan" ? getPeriodKey(p) : getArisanPeriodKey(p);
@@ -581,6 +700,7 @@ export default function RoutineBookPage() {
     const totalsMap = new Map<string, number>();
     for (const member of displayMembers) {
       for (const category of displayCategories) {
+        if (!memberSupportsCategory(member, category)) continue;
         let checkCount = 0;
         for (let p = 0; p < periodCount; p++) {
           const periodKey =
@@ -620,6 +740,7 @@ export default function RoutineBookPage() {
       let t = 0;
       for (const member of displayMembers) {
         for (const category of displayCategories) {
+          if (!memberSupportsCategory(member, category)) continue;
           const periodKey =
             frequency === "bulanan" ? getPeriodKey(p) : getArisanPeriodKey(p);
           const checklist = getChecklistStatus(
@@ -649,6 +770,135 @@ export default function RoutineBookPage() {
     sessions,
     selectedSessionId,
   ]);
+
+  const routineCashSummary = useMemo(() => {
+    let totalMasuk = 0;
+    let totalKeluar = 0;
+
+    for (const entry of routineCashEntries) {
+      if (entry.type === "masuk") totalMasuk += entry.amount;
+      else totalKeluar += entry.amount;
+    }
+
+    return {
+      totalMasuk,
+      totalKeluar,
+      saldo: totalMasuk - totalKeluar,
+    };
+  }, [routineCashEntries]);
+
+  const currentArisanScope = useMemo(
+    () => ({
+      scopeType: (frequency === "bulanan"
+        ? "year"
+        : "session") as RoutineArisanEntryScope,
+      scopeKey:
+        frequency === "bulanan" ? String(selectedYear) : selectedSessionId,
+      label:
+        frequency === "bulanan"
+          ? `Tahun ${selectedYear}`
+          : (sessions.find((s) => s.id === selectedSessionId)?.name ?? "Sesi"),
+    }),
+    [frequency, selectedYear, selectedSessionId, sessions],
+  );
+
+  const currentArisanRows = useMemo(
+    () =>
+      routineArisanEntries.filter(
+        (item) =>
+          item.scopeType === currentArisanScope.scopeType &&
+          item.scopeKey === currentArisanScope.scopeKey,
+      ),
+    [routineArisanEntries, currentArisanScope],
+  );
+
+  const arisanEntrySummary = useMemo(() => {
+    const totalNominal = currentArisanRows.reduce(
+      (sum, row) => sum + row.amount,
+      0,
+    );
+    return {
+      rowCount: currentArisanRows.length,
+      totalNominal,
+    };
+  }, [currentArisanRows]);
+
+  const saldoSummary = useMemo(() => {
+    const classifyCategory = (categoryName: string) => {
+      const normalized = categoryName.trim().toLowerCase();
+      if (normalized.includes("arisan")) return "arisan";
+      if (normalized.includes("kas")) return "kas";
+      return null;
+    };
+
+    let totalSaldo = 0;
+    let totalTransferred = 0;
+    let saldoKas = 0;
+    let saldoArisan = 0;
+
+    for (let p = 0; p < periodCount; p++) {
+      const periodKey =
+        frequency === "bulanan" ? getPeriodKey(p) : getArisanPeriodKey(p);
+
+      for (const category of displayCategories) {
+        const categoryType = classifyCategory(category.name);
+
+        for (const member of displayMembers) {
+          if (!memberSupportsCategory(member, category)) continue;
+          const checklist = getChecklistStatus(
+            member.id,
+            category.id,
+            periodKey,
+          );
+          if (!checklist?.checked || checklist.notPaid) continue;
+
+          const amount = (checklist.count ?? 1) * category.amount;
+          if (checklist.transferred) {
+            totalTransferred += amount;
+            continue;
+          }
+
+          totalSaldo += amount;
+          if (categoryType === "kas") saldoKas += amount;
+          if (categoryType === "arisan") saldoArisan += amount;
+        }
+      }
+    }
+
+    saldoKas += routineCashSummary.saldo;
+    saldoArisan -= arisanEntrySummary.totalNominal;
+    totalSaldo += routineCashSummary.saldo - arisanEntrySummary.totalNominal;
+
+    return {
+      totalSaldo,
+      totalTransferred,
+      saldoKas,
+      saldoArisan,
+    };
+  }, [
+    displayMembers,
+    displayCategories,
+    checklists,
+    selectedYear,
+    frequency,
+    selectedSessionId,
+    periodCount,
+    routineCashSummary,
+    arisanEntrySummary,
+  ]);
+
+  const visibleMembersWithCategories = useMemo(
+    () =>
+      displayMembers
+        .map((member) => ({
+          member,
+          categories: filteredCategories.filter((category) =>
+            memberSupportsCategory(member, category),
+          ),
+        }))
+        .filter((entry) => entry.categories.length > 0),
+    [displayMembers, filteredCategories, frequency],
+  );
 
   const years = useMemo(() => {
     const current = new Date().getFullYear();
@@ -747,6 +997,99 @@ export default function RoutineBookPage() {
     } catch (error) {
       console.error("Error transferring:", error);
       alert("Gagal mentransfer data");
+    }
+  };
+
+  const resetCashEntryForm = () => {
+    setCashEntryForm({
+      date: todayISO(),
+      type: "masuk",
+      amount: "",
+      note: "",
+    });
+  };
+
+  const handleOpenCashSaldoModal = () => {
+    setOpenCashSaldoModal(true);
+  };
+
+  const handleOpenArisanStatusModal = () => {
+    if (frequency === "arisan" && !selectedSessionId) return;
+    setOpenArisanStatusModal(true);
+  };
+
+  const handleOpenArisanEntryModal = () => {
+    setArisanEntryForm({ name: "", amount: "" });
+    setOpenArisanEntryModal(true);
+  };
+
+  const handleSaveArisanEntry = async () => {
+    const amount = Number(arisanEntryForm.amount.replace(/\D/g, "")) || 0;
+    if (
+      !currentArisanScope.scopeKey ||
+      !arisanEntryForm.name.trim() ||
+      amount <= 0
+    )
+      return;
+
+    setSavingArisanEntry(true);
+    try {
+      await addRoutineArisanEntry(safeBookId, {
+        scopeType: currentArisanScope.scopeType,
+        scopeKey: currentArisanScope.scopeKey,
+        name: arisanEntryForm.name,
+        amount,
+      });
+      await refreshData();
+      setArisanEntryForm({ name: "", amount: "" });
+      setOpenArisanEntryModal(false);
+    } finally {
+      setSavingArisanEntry(false);
+    }
+  };
+
+  const handleDeleteArisanEntry = async (entryId: string) => {
+    setDeletingArisanEntryId(entryId);
+    try {
+      await deleteRoutineArisanEntry(safeBookId, entryId);
+      await refreshData();
+    } finally {
+      setDeletingArisanEntryId(null);
+    }
+  };
+
+  const handleOpenCashEntryModal = () => {
+    resetCashEntryForm();
+    setOpenCashEntryModal(true);
+  };
+
+  const handleSaveCashEntry = async () => {
+    const amount = Number(cashEntryForm.amount.replace(/\D/g, "")) || 0;
+    if (!cashEntryForm.date || amount <= 0) return;
+
+    setSavingCashEntry(true);
+    try {
+      await addRoutineCashEntry(safeBookId, {
+        date: cashEntryForm.date,
+        type: cashEntryForm.type,
+        amount,
+        note: cashEntryForm.note.trim(),
+      });
+      await refreshData();
+      resetCashEntryForm();
+      setOpenCashEntryModal(false);
+    } finally {
+      setSavingCashEntry(false);
+    }
+  };
+
+  const handleDeleteCashEntry = async (entryId: string) => {
+    setDeletingCashEntryId(entryId);
+    try {
+      await deleteRoutineCashEntry(safeBookId, entryId);
+      await refreshData();
+    } finally {
+      setDeletingCashEntryId(null);
     }
   };
 
@@ -852,6 +1195,61 @@ export default function RoutineBookPage() {
         </Card>
       ) : (
         <>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <button
+              type="button"
+              onClick={handleOpenCashSaldoModal}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left hover:shadow-md hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    Saldo Kas
+                  </div>
+                  <div className="mt-1 text-base font-semibold text-emerald-600 dark:text-emerald-400">
+                    {formatIDR(saldoSummary.saldoKas)}
+                  </div>
+                </div>
+                <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                  Klik
+                </span>
+              </div>
+              <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                Lihat tabel pemasukan & pengeluaran kas
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={handleOpenArisanStatusModal}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left hover:shadow-md hover:border-violet-300 dark:border-slate-700 dark:bg-slate-800"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    Saldo Arisan
+                  </div>
+                  <div className="mt-1 text-base font-semibold text-violet-600 dark:text-violet-400">
+                    {formatIDR(saldoSummary.saldoArisan)}
+                  </div>
+                </div>
+                <span className="text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
+                  Klik
+                </span>
+              </div>
+              <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                Catat siapa yang sudah dapat / belum
+              </div>
+            </button>
+            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Total Saldo
+              </div>
+              <div className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
+                {formatIDR(saldoSummary.totalSaldo)}
+              </div>
+            </div>
+          </div>
+
           <div
             ref={scrollContainerRef}
             onMouseDown={handleMouseDown}
@@ -895,14 +1293,20 @@ export default function RoutineBookPage() {
               <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
                 <tr>
                   <th
-                    className="sticky left-0 top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
-                    style={{ width: "80px" }}
+                    className="sticky left-0 top-0 z-40 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
+                    style={{ width: "56px" }}
+                  >
+                    No
+                  </th>
+                  <th
+                    className="sticky top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
+                    style={{ left: "56px", width: "80px" }}
                   >
                     Anggota
                   </th>
                   <th
-                    className="sticky left-0 top-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
-                    style={{ left: "80px", width: "90px" }}
+                    className="sticky top-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
+                    style={{ left: "136px", width: "90px" }}
                   >
                     Kategori
                   </th>
@@ -937,141 +1341,47 @@ export default function RoutineBookPage() {
                 </tr>
               </thead>
               <tbody>
-                {displayMembers.map((member) =>
-                  filteredCategories.map((category, catIdx) => {
-                    const isFirstCategoryOfMember = catIdx === 0;
-                    return (
-                      <tr
-                        key={`${member.id}-${category.id}`}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                      >
-                        {isFirstCategoryOfMember ? (
-                          <td
-                            rowSpan={filteredCategories.length}
-                            className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center font-medium text-slate-900 dark:text-white"
-                            style={{ minWidth: "80px" }}
-                          >
-                            {member.name}
-                          </td>
-                        ) : null}
-
-                        <td
-                          className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center"
-                          style={{ left: "80px", minWidth: "90px" }}
+                {visibleMembersWithCategories.map(
+                  ({ member, categories: memberCategories }, memberIdx) =>
+                    memberCategories.map((category, catIdx) => {
+                      const isFirstCategoryOfMember = catIdx === 0;
+                      return (
+                        <tr
+                          key={`${member.id}-${category.id}`}
+                          className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
                         >
-                          <div className="text-sm text-slate-900 dark:text-white">
-                            {category.name}
-                          </div>
-                        </td>
+                          {isFirstCategoryOfMember ? (
+                            <td
+                              rowSpan={memberCategories.length}
+                              className="sticky left-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center font-medium text-slate-500 dark:text-slate-400"
+                              style={{ minWidth: "56px" }}
+                            >
+                              {memberIdx + 1}
+                            </td>
+                          ) : null}
 
-                        {frequency === "bulanan"
-                          ? MONTH_NAMES.map((_, pIdx) => {
-                              const periodKey = getPeriodKey(pIdx);
-                              const checklist = getChecklistStatus(
-                                member.id,
-                                category.id,
-                                periodKey,
-                              );
-                              const checked = checklist?.checked ?? false;
-                              const count = checklist?.count ?? 1;
-                              const isNotPaid = checklist?.notPaid ?? false;
-                              const transferred = isTransferred(
-                                periodKey,
-                                category.id,
-                              );
+                          {isFirstCategoryOfMember ? (
+                            <td
+                              rowSpan={memberCategories.length}
+                              className="sticky z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center font-medium text-slate-900 dark:text-white"
+                              style={{ left: "56px", minWidth: "80px" }}
+                            >
+                              {member.name}
+                            </td>
+                          ) : null}
 
-                              return (
-                                <td
-                                  key={pIdx}
-                                  className="border-b border-r border-slate-200 dark:border-slate-700 py-3"
-                                >
-                                  <div className="flex items-center justify-center">
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleCheckboxClick(
-                                          member.id,
-                                          category.id,
-                                          periodKey,
-                                        )
-                                      }
-                                      disabled={!userCanEdit || transferred}
-                                      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
-                                        !userCanEdit || transferred
-                                          ? "cursor-not-allowed opacity-60"
-                                          : ""
-                                      } ${
-                                        transferred
-                                          ? "border-green-600 bg-green-600 text-white"
-                                          : isNotPaid
-                                            ? "border-rose-600 bg-rose-600 text-white"
-                                            : checked
-                                              ? "border-slate-900 bg-slate-900 text-white"
-                                              : "border-slate-300 bg-white hover:border-slate-400"
-                                      }`}
-                                      title={
-                                        transferred
-                                          ? "Sudah ditransfer ke buku transaksi"
-                                          : ""
-                                      }
-                                    >
-                                      {transferred ? (
-                                        <svg
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          className="h-3 w-3"
-                                        >
-                                          <path d="M7 17L17 7" />
-                                          <path d="M17 17H7V7" />
-                                        </svg>
-                                      ) : isNotPaid ? (
-                                        <svg
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2.5"
-                                          strokeLinecap="round"
-                                          strokeLinejoin="round"
-                                          className="h-3 w-3"
-                                        >
-                                          <path d="M18 6 6 18" />
-                                          <path d="m6 6 12 12" />
-                                        </svg>
-                                      ) : checked ? (
-                                        count === 1 ? (
-                                          <svg
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="3"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                            className="h-3.5 w-3.5"
-                                          >
-                                            <polyline points="20 6 9 17 4 12" />
-                                          </svg>
-                                        ) : (
-                                          <span className="text-[10px] font-bold leading-none">
-                                            {count}x
-                                          </span>
-                                        )
-                                      ) : null}
-                                    </button>
-                                  </div>
-                                </td>
-                              );
-                            })
-                          : Array.from(
-                              { length: displayMembers.length },
-                              (_, pIdx) => {
-                                const periodKey = getArisanPeriodKey(pIdx);
+                          <td
+                            className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center"
+                            style={{ left: "136px", minWidth: "90px" }}
+                          >
+                            <div className="text-sm text-slate-900 dark:text-white">
+                              {category.name}
+                            </div>
+                          </td>
+
+                          {frequency === "bulanan"
+                            ? MONTH_NAMES.map((_, pIdx) => {
+                                const periodKey = getPeriodKey(pIdx);
                                 const checklist = getChecklistStatus(
                                   member.id,
                                   category.id,
@@ -1172,26 +1482,136 @@ export default function RoutineBookPage() {
                                     </div>
                                   </td>
                                 );
-                              },
-                            )}
+                              })
+                            : Array.from(
+                                { length: displayMembers.length },
+                                (_, pIdx) => {
+                                  const periodKey = getArisanPeriodKey(pIdx);
+                                  const checklist = getChecklistStatus(
+                                    member.id,
+                                    category.id,
+                                    periodKey,
+                                  );
+                                  const checked = checklist?.checked ?? false;
+                                  const count = checklist?.count ?? 1;
+                                  const isNotPaid = checklist?.notPaid ?? false;
+                                  const transferred = isTransferred(
+                                    periodKey,
+                                    category.id,
+                                  );
 
-                        <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center font-medium text-emerald-700 dark:text-emerald-400">
-                          {categoryTotals.get(`${member.id}:${category.id}`) ||
-                            0}
-                          x
-                        </td>
-                      </tr>
-                    );
-                  }),
+                                  return (
+                                    <td
+                                      key={pIdx}
+                                      className="border-b border-r border-slate-200 dark:border-slate-700 py-3"
+                                    >
+                                      <div className="flex items-center justify-center">
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleCheckboxClick(
+                                              member.id,
+                                              category.id,
+                                              periodKey,
+                                            )
+                                          }
+                                          disabled={!userCanEdit || transferred}
+                                          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded border ${
+                                            !userCanEdit || transferred
+                                              ? "cursor-not-allowed opacity-60"
+                                              : ""
+                                          } ${
+                                            transferred
+                                              ? "border-green-600 bg-green-600 text-white"
+                                              : isNotPaid
+                                                ? "border-rose-600 bg-rose-600 text-white"
+                                                : checked
+                                                  ? "border-slate-900 bg-slate-900 text-white"
+                                                  : "border-slate-300 bg-white hover:border-slate-400"
+                                          }`}
+                                          title={
+                                            transferred
+                                              ? "Sudah ditransfer ke buku transaksi"
+                                              : ""
+                                          }
+                                        >
+                                          {transferred ? (
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              className="h-3 w-3"
+                                            >
+                                              <path d="M7 17L17 7" />
+                                              <path d="M17 17H7V7" />
+                                            </svg>
+                                          ) : isNotPaid ? (
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2.5"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                              className="h-3 w-3"
+                                            >
+                                              <path d="M18 6 6 18" />
+                                              <path d="m6 6 12 12" />
+                                            </svg>
+                                          ) : checked ? (
+                                            count === 1 ? (
+                                              <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                strokeWidth="3"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                                className="h-3.5 w-3.5"
+                                              >
+                                                <polyline points="20 6 9 17 4 12" />
+                                              </svg>
+                                            ) : (
+                                              <span className="text-[10px] font-bold leading-none">
+                                                {count}x
+                                              </span>
+                                            )
+                                          ) : null}
+                                        </button>
+                                      </div>
+                                    </td>
+                                  );
+                                },
+                              )}
+
+                          <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center font-medium text-emerald-700 dark:text-emerald-400">
+                            {categoryTotals.get(
+                              `${member.id}:${category.id}`,
+                            ) || 0}
+                            x
+                          </td>
+                        </tr>
+                      );
+                    }),
                 )}
 
                 <tr className="bg-slate-50 dark:bg-slate-900 font-medium">
-                  <td className="sticky left-0 z-20 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center text-slate-900 dark:text-white">
+                  <td className="sticky left-0 z-30 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center text-slate-900 dark:text-white">
                     Total
                   </td>
                   <td
-                    className="sticky left-0 z-10 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
-                    style={{ left: "80px" }}
+                    className="sticky z-20 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
+                    style={{ left: "56px" }}
+                  ></td>
+                  <td
+                    className="sticky z-10 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
+                    style={{ left: "136px" }}
                   ></td>
                   {periodTotals.map((t, pIdx) => (
                     <td
@@ -1510,6 +1930,36 @@ export default function RoutineBookPage() {
         onClose={() => setOpenSessionMemberModal(false)}
       >
         <div className="grid gap-4">
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Atur anggota sesi lewat 2 tab. User aktif akan otomatis masuk sesi
+            jika dicentang minimal di salah satu tab.
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setSessionMemberSettingsTab("kas")}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                sessionMemberSettingsTab === "kas"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Setting Kas
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionMemberSettingsTab("arisan")}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                sessionMemberSettingsTab === "arisan"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Setting Arisan
+            </button>
+          </div>
+
           <div className="max-h-96 overflow-auto">
             {allProfiles.length === 0 ? (
               <div className="px-4 py-6 text-center text-sm text-slate-500">
@@ -1517,28 +1967,60 @@ export default function RoutineBookPage() {
               </div>
             ) : (
               <div className="grid gap-2">
-                {allProfiles.map((profile) => (
-                  <label
-                    key={profile.id}
-                    className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-slate-50 rounded"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedProfileIds.has(profile.id)}
-                      onChange={() => toggleSessionProfileSelection(profile.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-900">
-                        {profile.full_name}
+                {allProfiles.map((profile) => {
+                  const types = selectedSessionMemberTypes[profile.id] ?? {
+                    kas: true,
+                    arisan: true,
+                  };
+                  const isChecked =
+                    sessionMemberSettingsTab === "kas"
+                      ? types.kas
+                      : types.arisan;
+
+                  return (
+                    <label
+                      key={profile.id}
+                      className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() =>
+                          toggleSessionMemberType(
+                            profile.id,
+                            sessionMemberSettingsTab,
+                          )
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900">
+                          {profile.full_name}
+                        </div>
+                        <div className="mt-1 flex gap-1">
+                          {types.kas ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                              Kas
+                            </span>
+                          ) : null}
+                          {types.arisan ? (
+                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                              Arisan
+                            </span>
+                          ) : null}
+                          {!types.kas && !types.arisan ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                              Tidak aktif
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
-
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
@@ -1656,6 +2138,433 @@ export default function RoutineBookPage() {
       </Modal>
 
       <Modal
+        open={openCashSaldoModal}
+        title="Mutasi Saldo Kas"
+        onClose={() => setOpenCashSaldoModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Total Pemasukan
+              </div>
+              <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatIDR(routineCashSummary.totalMasuk)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Total Pengeluaran
+              </div>
+              <div className="text-base font-semibold text-rose-600 dark:text-rose-400">
+                {formatIDR(routineCashSummary.totalKeluar)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Saldo Kas Saat Ini
+              </div>
+              <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatIDR(saldoSummary.saldoKas)}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                Tabel Mutasi Saldo Kas
+              </div>
+              {userCanEdit && (
+                <Button onClick={handleOpenCashEntryModal}>Tambah</Button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
+                      Tanggal
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
+                      Tipe
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3">
+                      Keterangan
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right whitespace-nowrap">
+                      Nominal
+                    </th>
+                    {userCanEdit && (
+                      <th className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center whitespace-nowrap">
+                        Aksi
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {routineCashEntries.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={userCanEdit ? 5 : 4}
+                        className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
+                      >
+                        Belum ada pemasukan/pengeluaran saldo kas.
+                      </td>
+                    </tr>
+                  ) : (
+                    routineCashEntries.map((entry) => (
+                      <tr
+                        key={entry.id}
+                        className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      >
+                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap text-slate-900 dark:text-white">
+                          {entry.date}
+                        </td>
+                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
+                              entry.type === "masuk"
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                                : "bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
+                            }`}
+                          >
+                            {entry.type === "masuk"
+                              ? "Pemasukan"
+                              : "Pengeluaran"}
+                          </span>
+                        </td>
+                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-600 dark:text-slate-300">
+                          {entry.note || "-"}
+                        </td>
+                        <td
+                          className={`border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-medium whitespace-nowrap ${
+                            entry.type === "masuk"
+                              ? "text-emerald-700 dark:text-emerald-400"
+                              : "text-rose-700 dark:text-rose-400"
+                          }`}
+                        >
+                          {entry.type === "masuk" ? "+" : "-"}
+                          {formatIDR(entry.amount)}
+                        </td>
+                        {userCanEdit && (
+                          <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCashEntry(entry.id)}
+                              disabled={deletingCashEntryId === entry.id}
+                              className="inline-flex items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-900/20 px-3 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 disabled:opacity-60"
+                            >
+                              {deletingCashEntryId === entry.id
+                                ? "Menghapus..."
+                                : "Hapus"}
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openCashEntryModal}
+        title="Tambah Mutasi Kas"
+        onClose={() => setOpenCashEntryModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tanggal
+              </div>
+              <Input
+                type="date"
+                value={cashEntryForm.date}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    date: e.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tipe
+              </div>
+              <Select
+                value={cashEntryForm.type}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    type: e.target.value as TxType,
+                  }))
+                }
+              >
+                <option value="masuk">Pemasukan</option>
+                <option value="keluar">Pengeluaran</option>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nominal
+              </div>
+              <Input
+                inputMode="numeric"
+                placeholder="Contoh: 50000"
+                value={cashEntryForm.amount}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    amount: e.target.value.replace(/\D/g, ""),
+                  }))
+                }
+              />
+              {cashEntryForm.amount && Number(cashEntryForm.amount) > 0 && (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {formatIDR(Number(cashEntryForm.amount))}
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Keterangan
+              </div>
+              <Input
+                placeholder="Contoh: Beli konsumsi"
+                value={cashEntryForm.note}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    note: e.target.value,
+                  }))
+                }
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenCashEntryModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleSaveCashEntry}
+              disabled={
+                savingCashEntry ||
+                !cashEntryForm.date ||
+                (Number(cashEntryForm.amount.replace(/\D/g, "")) || 0) <= 0
+              }
+            >
+              {savingCashEntry ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openArisanStatusModal}
+        title={`Saldo Arisan — ${currentArisanScope.label}`}
+        onClose={() => setOpenArisanStatusModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Saldo Arisan
+              </div>
+              <div className="text-base font-semibold text-violet-600 dark:text-violet-400">
+                {formatIDR(saldoSummary.saldoArisan)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Total Nominal Terpakai
+              </div>
+              <div className="text-base font-semibold text-rose-600 dark:text-rose-400">
+                {formatIDR(arisanEntrySummary.totalNominal)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Total Saldo
+              </div>
+              <div className="text-base font-semibold text-slate-900 dark:text-white">
+                {formatIDR(saldoSummary.totalSaldo)}
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+                Jumlah Data
+              </div>
+              <div className="text-base font-semibold text-slate-900 dark:text-white">
+                {arisanEntrySummary.rowCount} baris
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                Tabel Saldo Arisan
+              </div>
+              {userCanEdit && (
+                <Button onClick={handleOpenArisanEntryModal}>Tambah</Button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
+                      Nama
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right whitespace-nowrap">
+                      Nominal
+                    </th>
+                    {userCanEdit && (
+                      <th className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center whitespace-nowrap">
+                        Aksi
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {currentArisanRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={userCanEdit ? 3 : 2}
+                        className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
+                      >
+                        Belum ada data. Tambahkan nama dan nominal penerima
+                        arisan.
+                      </td>
+                    </tr>
+                  ) : (
+                    currentArisanRows.map((row) => (
+                      <tr
+                        key={row.id}
+                        className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                      >
+                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium text-slate-900 dark:text-white whitespace-nowrap">
+                          {row.name}
+                        </td>
+                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-medium text-rose-700 dark:text-rose-400 whitespace-nowrap">
+                          -{formatIDR(row.amount)}
+                        </td>
+                        {userCanEdit && (
+                          <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center">
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteArisanEntry(row.id)}
+                              disabled={deletingArisanEntryId === row.id}
+                              className="inline-flex items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-900/20 px-3 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 disabled:opacity-60"
+                            >
+                              {deletingArisanEntryId === row.id
+                                ? "Menghapus..."
+                                : "Hapus"}
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenArisanStatusModal(false)}
+            >
+              Tutup
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openArisanEntryModal}
+        title="Tambah Data Saldo Arisan"
+        onClose={() => setOpenArisanEntryModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nama
+              </div>
+              <Input
+                placeholder="Contoh: Budi"
+                value={arisanEntryForm.name}
+                onChange={(e) =>
+                  setArisanEntryForm((prev) => ({
+                    ...prev,
+                    name: e.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nominal
+              </div>
+              <Input
+                inputMode="numeric"
+                placeholder="Contoh: 50000"
+                value={arisanEntryForm.amount}
+                onChange={(e) =>
+                  setArisanEntryForm((prev) => ({
+                    ...prev,
+                    amount: e.target.value.replace(/\D/g, ""),
+                  }))
+                }
+              />
+              {arisanEntryForm.amount && Number(arisanEntryForm.amount) > 0 && (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {formatIDR(Number(arisanEntryForm.amount))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenArisanEntryModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleSaveArisanEntry}
+              disabled={
+                savingArisanEntry ||
+                !currentArisanScope.scopeKey ||
+                !arisanEntryForm.name.trim() ||
+                (Number(arisanEntryForm.amount.replace(/\D/g, "")) || 0) <= 0
+              }
+            >
+              {savingArisanEntry ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
         open={openDetailModal}
         title={
           frequency === "bulanan"
@@ -1664,52 +2573,40 @@ export default function RoutineBookPage() {
         }
         onClose={() => setOpenDetailModal(false)}
       >
-        {/* Summary card */}
-        {(() => {
-          let totalSaldo = 0;
-          let totalTransferred = 0;
-          for (let p = 0; p < periodCount; p++) {
-            const periodKey =
-              frequency === "bulanan" ? getPeriodKey(p) : getArisanPeriodKey(p);
-            displayCategories.forEach((category) => {
-              displayMembers.forEach((member) => {
-                const checklist = getChecklistStatus(
-                  member.id,
-                  category.id,
-                  periodKey,
-                );
-                if (checklist?.checked && !checklist.notPaid) {
-                  const amount = (checklist.count ?? 1) * category.amount;
-                  if (checklist.transferred) {
-                    totalTransferred += amount;
-                  } else {
-                    totalSaldo += amount;
-                  }
-                }
-              });
-            });
-          }
-          return (
-            <div className="mb-4 grid grid-cols-2 gap-3">
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                  Total Saldo
-                </div>
-                <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
-                  {formatIDR(totalSaldo)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-                <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-                  Sudah Ditransfer
-                </div>
-                <div className="text-base font-semibold text-blue-600 dark:text-blue-400">
-                  {formatIDR(totalTransferred)}
-                </div>
-              </div>
+        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+              Saldo Kas
             </div>
-          );
-        })()}
+            <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
+              {formatIDR(saldoSummary.saldoKas)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+              Saldo Arisan
+            </div>
+            <div className="text-base font-semibold text-violet-600 dark:text-violet-400">
+              {formatIDR(saldoSummary.saldoArisan)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+              Total Saldo
+            </div>
+            <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
+              {formatIDR(saldoSummary.totalSaldo)}
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+              Sudah Ditransfer
+            </div>
+            <div className="text-base font-semibold text-blue-600 dark:text-blue-400">
+              {formatIDR(saldoSummary.totalTransferred)}
+            </div>
+          </div>
+        </div>
         <div className="mb-3 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -1731,6 +2628,7 @@ export default function RoutineBookPage() {
             style={{ tableLayout: "fixed", minWidth: "600px" }}
           >
             <colgroup>
+              <col style={{ width: "56px" }} />
               <col style={{ width: "100px" }} />
               {displayCategories.map((category) => (
                 <col key={category.id} style={{ width: "140px" }} />
@@ -1739,7 +2637,13 @@ export default function RoutineBookPage() {
             </colgroup>
             <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3">
+                <th className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center">
+                  No
+                </th>
+                <th
+                  className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3"
+                  style={{ left: "56px" }}
+                >
                   {frequency === "bulanan" ? "Bulan" : "Putaran"}
                 </th>
                 {displayCategories.map((category) => (
@@ -1777,6 +2681,7 @@ export default function RoutineBookPage() {
                   let categoryAmountAll = 0; // Untuk tampilan (termasuk transferred)
 
                   displayMembers.forEach((member) => {
+                    if (!memberSupportsCategory(member, category)) return;
                     const checklist = getChecklistStatus(
                       member.id,
                       category.id,
@@ -1806,7 +2711,13 @@ export default function RoutineBookPage() {
                     key={periodIndex}
                     className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
                   >
-                    <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 font-medium text-slate-900 dark:text-white">
+                    <td className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-center font-medium text-slate-500 dark:text-slate-400">
+                      {periodIndex + 1}
+                    </td>
+                    <td
+                      className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 font-medium text-slate-900 dark:text-white"
+                      style={{ left: "56px" }}
+                    >
                       {periodName}
                     </td>
                     {displayCategories.map((category) => {
@@ -1863,9 +2774,13 @@ export default function RoutineBookPage() {
                 );
               })}
               <tr className="bg-slate-50 dark:bg-slate-900 font-semibold">
-                <td className="sticky left-0 z-10 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-white">
+                <td className="sticky left-0 z-20 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center text-slate-900 dark:text-white">
                   Total
                 </td>
+                <td
+                  className="sticky z-10 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3"
+                  style={{ left: "56px" }}
+                ></td>
                 {displayCategories.map((category) => {
                   let categoryTotal = 0;
                   for (let p = 0; p < periodCount; p++) {
@@ -1874,6 +2789,7 @@ export default function RoutineBookPage() {
                         ? getPeriodKey(p)
                         : getArisanPeriodKey(p);
                     displayMembers.forEach((member) => {
+                      if (!memberSupportsCategory(member, category)) return;
                       const checklist = getChecklistStatus(
                         member.id,
                         category.id,
@@ -1909,6 +2825,7 @@ export default function RoutineBookPage() {
                             ? getPeriodKey(p)
                             : getArisanPeriodKey(p);
                         displayMembers.forEach((member) => {
+                          if (!memberSupportsCategory(member, category)) return;
                           const checklist = getChecklistStatus(
                             member.id,
                             category.id,

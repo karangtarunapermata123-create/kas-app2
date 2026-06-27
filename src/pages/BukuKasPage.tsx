@@ -88,6 +88,12 @@ export default function BukuKasPage() {
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
     new Set(),
   );
+  const [selectedMemberTypes, setSelectedMemberTypes] = useState<
+    Record<string, { kas: boolean; arisan: boolean }>
+  >({});
+  const [memberSettingsTab, setMemberSettingsTab] = useState<"kas" | "arisan">(
+    "kas",
+  );
   const [isEditMode, setIsEditMode] = useState(false); // untuk membedakan add vs edit
 
   // State untuk modal kelola kategori
@@ -508,7 +514,10 @@ export default function BukuKasPage() {
   }
 
   function addNewRoutineMemberRow() {
-    setNewRoutineMembers((prev) => [...prev, { id: uid("rm"), name: "" }]);
+    setNewRoutineMembers((prev) => [
+      ...prev,
+      { id: uid("rm"), name: "", joinsKas: true, joinsArisan: true },
+    ]);
   }
 
   function updateNewRoutineMember(id: string, name: string) {
@@ -546,7 +555,10 @@ export default function BukuKasPage() {
   }
 
   function addEditRoutineMemberRow() {
-    setEditRoutineMembers((prev) => [...prev, { id: uid("rm"), name: "" }]);
+    setEditRoutineMembers((prev) => [
+      ...prev,
+      { id: uid("rm"), name: "", joinsKas: true, joinsArisan: true },
+    ]);
   }
 
   function updateEditRoutineMember(id: string, name: string) {
@@ -586,16 +598,29 @@ export default function BukuKasPage() {
   async function openMemberModalForAdd() {
     const profiles = await getAllProfiles();
     setAllProfiles(profiles);
-    // Set selected dari newRoutineMembers yang sudah ada
-    const existingNames = new Set(
-      newRoutineMembers.map((m) => m.name.trim().toLowerCase()),
+    const memberByName = new Map(
+      newRoutineMembers.map((m) => [m.name.trim().toLowerCase(), m]),
     );
     const selected = new Set(
       profiles
-        .filter((p) => existingNames.has(p.full_name.trim().toLowerCase()))
+        .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
+    const types = Object.fromEntries(
+      profiles.map((p) => {
+        const existing = memberByName.get(p.full_name.trim().toLowerCase());
+        return [
+          p.id,
+          {
+            kas: existing?.joinsKas ?? true,
+            arisan: existing?.joinsArisan ?? true,
+          },
+        ];
+      }),
+    );
     setSelectedProfileIds(selected);
+    setSelectedMemberTypes(types);
+    setMemberSettingsTab("kas");
     setIsEditMode(false);
     setOpenMemberModal(true);
   }
@@ -603,16 +628,29 @@ export default function BukuKasPage() {
   async function openMemberModalForEdit() {
     const profiles = await getAllProfiles();
     setAllProfiles(profiles);
-    // Set selected dari editRoutineMembers yang sudah ada
-    const existingNames = new Set(
-      editRoutineMembers.map((m) => m.name.trim().toLowerCase()),
+    const memberByName = new Map(
+      editRoutineMembers.map((m) => [m.name.trim().toLowerCase(), m]),
     );
     const selected = new Set(
       profiles
-        .filter((p) => existingNames.has(p.full_name.trim().toLowerCase()))
+        .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
+    const types = Object.fromEntries(
+      profiles.map((p) => {
+        const existing = memberByName.get(p.full_name.trim().toLowerCase());
+        return [
+          p.id,
+          {
+            kas: existing?.joinsKas ?? true,
+            arisan: existing?.joinsArisan ?? true,
+          },
+        ];
+      }),
+    );
     setSelectedProfileIds(selected);
+    setSelectedMemberTypes(types);
+    setMemberSettingsTab("kas");
     setIsEditMode(true);
     setOpenMemberModal(true);
   }
@@ -627,15 +665,52 @@ export default function BukuKasPage() {
       }
       return next;
     });
+    setSelectedMemberTypes((prev) => ({
+      ...prev,
+      [profileId]: prev[profileId] ?? { kas: true, arisan: true },
+    }));
+  }
+
+  function toggleMemberType(profileId: string, type: "kas" | "arisan") {
+    setSelectedMemberTypes((prev) => {
+      const current = prev[profileId] ?? { kas: true, arisan: true };
+      const next = {
+        kas: type === "kas" ? !current.kas : current.kas,
+        arisan: type === "arisan" ? !current.arisan : current.arisan,
+      };
+
+      setSelectedProfileIds((prevIds) => {
+        const nextIds = new Set(prevIds);
+        if (next.kas || next.arisan) {
+          nextIds.add(profileId);
+        } else {
+          nextIds.delete(profileId);
+        }
+        return nextIds;
+      });
+
+      return {
+        ...prev,
+        [profileId]: next,
+      };
+    });
   }
 
   function applySelectedMembers() {
-    const selectedProfiles = allProfiles.filter((p) =>
-      selectedProfileIds.has(p.id),
+    const currentMembers = isEditMode ? editRoutineMembers : newRoutineMembers;
+    const memberIdByName = new Map(
+      currentMembers.map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
+
+    const selectedProfiles = allProfiles.filter((p) => {
+      const types = selectedMemberTypes[p.id];
+      return Boolean(types?.kas || types?.arisan);
+    });
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
-      id: uid("rm"),
+      id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
       name: p.full_name,
+      joinsKas: selectedMemberTypes[p.id]?.kas ?? true,
+      joinsArisan: selectedMemberTypes[p.id]?.arisan ?? true,
     }));
 
     if (isEditMode) {
@@ -1203,6 +1278,36 @@ export default function BukuKasPage() {
         onClose={() => setOpenMemberModal(false)}
       >
         <div className="grid gap-4">
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+            Atur anggota lewat 2 tab supaya lebih cepat. User aktif akan
+            otomatis tersimpan jika dicentang minimal di salah satu tab.
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setMemberSettingsTab("kas")}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                memberSettingsTab === "kas"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Setting Kas
+            </button>
+            <button
+              type="button"
+              onClick={() => setMemberSettingsTab("arisan")}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
+                memberSettingsTab === "arisan"
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+            >
+              Setting Arisan
+            </button>
+          </div>
+
           <div className="max-h-96 overflow-auto">
             {allProfiles.length === 0 ? (
               <div className="px-4 py-6 text-center text-sm text-slate-500">
@@ -1210,24 +1315,52 @@ export default function BukuKasPage() {
               </div>
             ) : (
               <div className="grid gap-2">
-                {allProfiles.map((profile) => (
-                  <label
-                    key={profile.id}
-                    className="flex items-center gap-3 px-2 py-2 cursor-pointer hover:bg-slate-50 rounded"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedProfileIds.has(profile.id)}
-                      onChange={() => toggleProfileSelection(profile.id)}
-                      className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-slate-900">
-                        {profile.full_name}
+                {allProfiles.map((profile) => {
+                  const types = selectedMemberTypes[profile.id] ?? {
+                    kas: true,
+                    arisan: true,
+                  };
+                  const isChecked =
+                    memberSettingsTab === "kas" ? types.kas : types.arisan;
+
+                  return (
+                    <label
+                      key={profile.id}
+                      className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={() =>
+                          toggleMemberType(profile.id, memberSettingsTab)
+                        }
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900">
+                          {profile.full_name}
+                        </div>
+                        <div className="mt-1 flex gap-1">
+                          {types.kas ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+                              Kas
+                            </span>
+                          ) : null}
+                          {types.arisan ? (
+                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">
+                              Arisan
+                            </span>
+                          ) : null}
+                          {!types.kas && !types.arisan ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                              Tidak aktif
+                            </span>
+                          ) : null}
+                        </div>
                       </div>
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>

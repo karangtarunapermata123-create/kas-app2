@@ -56,12 +56,36 @@ export type Transaction = {
 export type RoutineMember = {
   id: string;
   name: string;
+  joinsKas?: boolean;
+  joinsArisan?: boolean;
 };
 
 export type RoutineCategory = {
   id: string;
   name: string;
   amount: number;
+};
+
+export type RoutineCashEntry = {
+  id: string;
+  bookId: string;
+  date: string;
+  type: TxType;
+  amount: number;
+  note: string;
+  createdAt?: string;
+};
+
+export type RoutineArisanEntryScope = "year" | "session";
+
+export type RoutineArisanEntry = {
+  id: string;
+  bookId: string;
+  scopeType: RoutineArisanEntryScope;
+  scopeKey: string;
+  name: string;
+  amount: number;
+  createdAt?: string;
 };
 
 export type RoutineChecklist = {
