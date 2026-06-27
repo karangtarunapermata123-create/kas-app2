@@ -1304,12 +1304,14 @@ export default function RoutineBookPage() {
                   >
                     Anggota
                   </th>
-                  <th
-                    className="sticky top-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
-                    style={{ left: "136px", width: "90px" }}
-                  >
-                    Kategori
-                  </th>
+                  {selectedCategoryId === null && (
+                    <th
+                      className="sticky top-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3 text-center"
+                      style={{ left: "136px", width: "90px" }}
+                    >
+                      Kategori
+                    </th>
+                  )}
                   {frequency === "bulanan"
                     ? MONTH_NAMES.map((month, idx) => (
                         <th
@@ -1370,14 +1372,16 @@ export default function RoutineBookPage() {
                             </td>
                           ) : null}
 
-                          <td
-                            className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center"
-                            style={{ left: "136px", minWidth: "90px" }}
-                          >
-                            <div className="text-sm text-slate-900 dark:text-white">
-                              {category.name}
-                            </div>
-                          </td>
+                          {selectedCategoryId === null && (
+                            <td
+                              className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2 py-3 text-center"
+                              style={{ left: "136px", minWidth: "90px" }}
+                            >
+                              <div className="text-sm text-slate-900 dark:text-white">
+                                {category.name}
+                              </div>
+                            </td>
+                          )}
 
                           {frequency === "bulanan"
                             ? MONTH_NAMES.map((_, pIdx) => {
@@ -1609,10 +1613,12 @@ export default function RoutineBookPage() {
                     className="sticky z-20 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
                     style={{ left: "56px" }}
                   ></td>
-                  <td
-                    className="sticky z-10 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
-                    style={{ left: "136px" }}
-                  ></td>
+                  {selectedCategoryId === null && (
+                    <td
+                      className="sticky z-10 border-r border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3"
+                      style={{ left: "136px" }}
+                    ></td>
+                  )}
                   {periodTotals.map((t, pIdx) => (
                     <td
                       key={pIdx}
