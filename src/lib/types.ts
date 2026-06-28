@@ -56,8 +56,7 @@ export type Transaction = {
 export type RoutineMember = {
   id: string;
   name: string;
-  joinsKas?: boolean;
-  joinsArisan?: boolean;
+  categoryIds?: string[]; // Array of category IDs this member is part of
 };
 
 export type RoutineCategory = {
@@ -69,6 +68,7 @@ export type RoutineCategory = {
 export type RoutineCashEntry = {
   id: string;
   bookId: string;
+  categoryId: string; // Added category ID
   date: string;
   type: TxType;
   amount: number;

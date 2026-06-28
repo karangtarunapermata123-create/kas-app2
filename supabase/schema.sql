@@ -115,12 +115,14 @@ create table if not exists public.routine_sessions (
 create table if not exists public.routine_cash_entries (
   id          text primary key,
   book_id     text not null references public.books(id) on delete cascade,
+  category_id text not null default 'kas',
   date        text not null,
   type        text not null check (type in ('masuk', 'keluar')),
   amount      bigint not null default 0,
   note        text not null default '',
   created_at  timestamptz not null default now()
 );
+
 
 create index if not exists idx_routine_cash_entries_book_date
 on public.routine_cash_entries(book_id, date desc, created_at desc);

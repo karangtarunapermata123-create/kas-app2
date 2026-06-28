@@ -27,6 +27,7 @@ import {
   updateRoutineSession,
   toggleRoutineChecklist,
   transferRoutineToTransaction,
+  updateRoutineCashEntry,
 } from "../lib/store";
 import type {
   Book,
@@ -79,12 +80,19 @@ export default function RoutineBookPage() {
     null,
   );
 
-  // Drag to scroll
+  // Drag to scroll for categories
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [startX, setStartX] = useState(0);
   const [scrollLeft, setScrollLeft] = useState(0);
   const [hasDragged, setHasDragged] = useState(false);
+
+  // Drag to scroll for saldo cards
+  const saldoScrollContainerRef = useRef<HTMLDivElement>(null);
+  const [isSaldoDragging, setIsSaldoDragging] = useState(false);
+  const [saldoStartX, setSaldoStartX] = useState(0);
+  const [saldoScrollLeft, setSaldoScrollLeft] = useState(0);
+  const [saldoHasDragged, setSaldoHasDragged] = useState(false);
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!scrollContainerRef.current) return;
@@ -94,12 +102,22 @@ export default function RoutineBookPage() {
     setScrollLeft(scrollContainerRef.current.scrollLeft);
   };
 
+  const handleSaldoMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!saldoScrollContainerRef.current) return;
+    setIsSaldoDragging(true);
+    setSaldoHasDragged(false);
+    setSaldoStartX(e.pageX - saldoScrollContainerRef.current.offsetLeft);
+    setSaldoScrollLeft(saldoScrollContainerRef.current.scrollLeft);
+  };
+
   const handleMouseLeave = () => {
     setIsDragging(false);
+    setIsSaldoDragging(false);
   };
 
   const handleMouseUp = () => {
     setIsDragging(false);
+    setIsSaldoDragging(false);
   };
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -115,6 +133,19 @@ export default function RoutineBookPage() {
     }
   };
 
+  const handleSaldoMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isSaldoDragging || !saldoScrollContainerRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - saldoScrollContainerRef.current.offsetLeft;
+    const walk = (x - saldoStartX) * 2; // Scroll speed multiplier
+    saldoScrollContainerRef.current.scrollLeft = saldoScrollLeft - walk;
+
+    // Mark as dragged if moved more than 5px
+    if (Math.abs(walk) > 5) {
+      setSaldoHasDragged(true);
+    }
+  };
+
   const handleCategoryClick = (categoryId: string | null) => {
     // Prevent click if user was dragging
     if (hasDragged) {
@@ -122,6 +153,17 @@ export default function RoutineBookPage() {
       return;
     }
     setSelectedCategoryId(categoryId);
+  };
+
+  const handleSaldoCardClick = (handleClick: (() => void) | undefined) => {
+    // Prevent click if user was dragging
+    if (saldoHasDragged) {
+      setSaldoHasDragged(false);
+      return;
+    }
+    if (handleClick) {
+      handleClick();
+    }
   };
 
   const [book, setBook] = useState<Book | undefined>(undefined);
@@ -160,12 +202,10 @@ export default function RoutineBookPage() {
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
     new Set(),
   );
-  const [selectedSessionMemberTypes, setSelectedSessionMemberTypes] = useState<
-    Record<string, { kas: boolean; arisan: boolean }>
+  const [selectedSessionMemberCategoryIds, setSelectedSessionMemberCategoryIds] = useState<
+    Record<string, Set<string>>
   >({});
-  const [sessionMemberSettingsTab, setSessionMemberSettingsTab] = useState<
-    "kas" | "arisan"
-  >("kas");
+  const [sessionMemberSettingsTab, setSessionMemberSettingsTab] = useState<string>(""); // current category id
   const [availableSessionCategories, setAvailableSessionCategories] = useState<
     RoutineCategory[]
   >([]);
@@ -209,6 +249,9 @@ export default function RoutineBookPage() {
   const [openCashEntryModal, setOpenCashEntryModal] = useState(false);
   const [openArisanStatusModal, setOpenArisanStatusModal] = useState(false);
   const [openArisanEntryModal, setOpenArisanEntryModal] = useState(false);
+  const [selectedCategoryForModal, setSelectedCategoryForModal] = useState<
+    RoutineCategory | null
+  >(null);
   const [arisanEntryForm, setArisanEntryForm] = useState({
     name: "",
     amount: "",
@@ -222,16 +265,28 @@ export default function RoutineBookPage() {
     type: TxType;
     amount: string;
     note: string;
+    categoryId: string;
   }>({
     date: todayISO(),
     type: "masuk",
     amount: "",
     note: "",
+    categoryId: "",
   });
   const [savingCashEntry, setSavingCashEntry] = useState(false);
   const [deletingCashEntryId, setDeletingCashEntryId] = useState<string | null>(
     null,
   );
+  const [confirmDeleteCashEntryId, setConfirmDeleteCashEntryId] = useState<string | null>(null);
+  const [editingCashEntry, setEditingCashEntry] = useState<RoutineCashEntry | null>(null);
+  const [editCashEntryForm, setEditCashEntryForm] = useState<{
+    date: string;
+    type: TxType;
+    amount: string;
+    note: string;
+    categoryId: string;
+  }>({ date: "", type: "masuk", amount: "", note: "", categoryId: "" });
+  const [savingEditCashEntry, setSavingEditCashEntry] = useState(false);
 
   const refreshData = async () => {
     const [
@@ -431,6 +486,14 @@ export default function RoutineBookPage() {
     const profiles = await getAllProfiles();
     setAllProfiles(profiles);
 
+    // Set available session categories
+    const existingCategories = (session.categories || []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      amount: c.amount,
+    }));
+    setAvailableSessionCategories(existingCategories);
+
     const memberByName = new Map(
       (session.members || []).map((m) => [m.name.trim().toLowerCase(), m]),
     );
@@ -439,21 +502,17 @@ export default function RoutineBookPage() {
         .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
-    const types = Object.fromEntries(
+    const categoryIds = Object.fromEntries(
       profiles.map((p) => {
         const existing = memberByName.get(p.full_name.trim().toLowerCase());
-        return [
-          p.id,
-          {
-            kas: existing?.joinsKas ?? true,
-            arisan: existing?.joinsArisan ?? true,
-          },
-        ];
+        return [p.id, new Set(existing?.categoryIds ?? [])];
       }),
     );
     setSelectedProfileIds(selected);
-    setSelectedSessionMemberTypes(types);
-    setSessionMemberSettingsTab("kas");
+    setSelectedSessionMemberCategoryIds(categoryIds);
+    if (existingCategories.length > 0) {
+      setSessionMemberSettingsTab(existingCategories[0].id);
+    }
     setEditingSessionId(sessionId);
     setOpenSessionMemberModal(true);
   }
@@ -468,32 +527,39 @@ export default function RoutineBookPage() {
       }
       return next;
     });
-    setSelectedSessionMemberTypes((prev) => ({
-      ...prev,
-      [profileId]: prev[profileId] ?? { kas: true, arisan: true },
-    }));
+    // Initialize with empty categoryIds when adding new profile
+    setSelectedSessionMemberCategoryIds((prev) => {
+      const next = { ...prev };
+      if (!next[profileId]) {
+        next[profileId] = new Set();
+      }
+      return next;
+    });
   }
 
-  function toggleSessionMemberType(profileId: string, type: "kas" | "arisan") {
-    setSelectedSessionMemberTypes((prev) => {
-      const current = prev[profileId] ?? { kas: true, arisan: true };
-      const next = {
-        kas: type === "kas" ? !current.kas : current.kas,
-        arisan: type === "arisan" ? !current.arisan : current.arisan,
-      };
+  function toggleSessionMemberCategory(profileId: string) {
+    if (!sessionMemberSettingsTab) return;
+    setSelectedSessionMemberCategoryIds((prev) => {
+      const next = { ...prev };
+      const current = next[profileId] || new Set();
+      const newCats = new Set(current);
+      if (newCats.has(sessionMemberSettingsTab)) {
+        newCats.delete(sessionMemberSettingsTab);
+      } else {
+        newCats.add(sessionMemberSettingsTab);
+      }
+      next[profileId] = newCats;
+      // Update selected profiles if needed
       setSelectedProfileIds((prevIds) => {
         const nextIds = new Set(prevIds);
-        if (next.kas || next.arisan) {
-          nextIds.add(profileId);
-        } else {
+        if (newCats.size === 0) {
           nextIds.delete(profileId);
+        } else {
+          nextIds.add(profileId);
         }
         return nextIds;
       });
-      return {
-        ...prev,
-        [profileId]: next,
-      };
+      return next;
     });
   }
 
@@ -505,15 +571,11 @@ export default function RoutineBookPage() {
       (session?.members || []).map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
 
-    const selectedProfiles = allProfiles.filter((p) => {
-      const types = selectedSessionMemberTypes[p.id];
-      return Boolean(types?.kas || types?.arisan);
-    });
+    const selectedProfiles = allProfiles.filter((p) => selectedProfileIds.has(p.id));
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
       id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
       name: p.full_name,
-      joinsKas: selectedSessionMemberTypes[p.id]?.kas ?? true,
-      joinsArisan: selectedSessionMemberTypes[p.id]?.arisan ?? true,
+      categoryIds: Array.from(selectedSessionMemberCategoryIds[p.id] || []),
     }));
 
     await updateRoutineSession(safeBookId, editingSessionId, { members });
@@ -527,9 +589,9 @@ export default function RoutineBookPage() {
     const session = sessions.find((s) => s.id === sessionId);
     if (!session) return;
 
-    // Load kategori yang sudah ada dari session.categories
+    // Load kategori yang sudah ada dari session.categories, PRESERVE the original ids!
     const existingCategories = (session.categories || []).map((c) => ({
-      id: uid("rc"),
+      id: c.id, // IMPORTANT: Don't change the id!
       name: c.name,
       amount: c.amount,
     }));
@@ -611,7 +673,7 @@ export default function RoutineBookPage() {
       selectedSessionCategoryIds.has(c.id),
     );
     const categories: RoutineCategory[] = selectedCats.map((c) => ({
-      id: uid("rc"),
+      id: c.id, // PRESERVE the original id!
       name: c.name,
       amount: c.amount,
     }));
@@ -649,12 +711,9 @@ export default function RoutineBookPage() {
     member: RoutineMember,
     category: RoutineCategory,
   ) => {
-    const normalized = category.name.trim().toLowerCase();
-    if (normalized.includes("arisan")) {
-      return member.joinsArisan !== false;
-    }
-    if (normalized.includes("kas")) {
-      return member.joinsKas !== false;
+    // Check if member has this category in their categoryIds, if not assume they support all (for backward compatibility)
+    if (member.categoryIds && member.categoryIds.length > 0) {
+      return member.categoryIds.includes(category.id);
     }
     return true;
   };
@@ -772,18 +831,34 @@ export default function RoutineBookPage() {
   ]);
 
   const routineCashSummary = useMemo(() => {
+    const totalMasukByCategory = new Map<string, number>();
+    const totalKeluarByCategory = new Map<string, number>();
     let totalMasuk = 0;
     let totalKeluar = 0;
 
     for (const entry of routineCashEntries) {
-      if (entry.type === "masuk") totalMasuk += entry.amount;
-      else totalKeluar += entry.amount;
+      const categoryId = entry.categoryId ?? "kas";
+      if (entry.type === "masuk") {
+        totalMasuk += entry.amount;
+        totalMasukByCategory.set(
+          categoryId,
+          (totalMasukByCategory.get(categoryId) ?? 0) + entry.amount
+        );
+      } else {
+        totalKeluar += entry.amount;
+        totalKeluarByCategory.set(
+          categoryId,
+          (totalKeluarByCategory.get(categoryId) ?? 0) + entry.amount
+        );
+      }
     }
 
     return {
       totalMasuk,
       totalKeluar,
       saldo: totalMasuk - totalKeluar,
+      totalMasukByCategory,
+      totalKeluarByCategory,
     };
   }, [routineCashEntries]);
 
@@ -835,7 +910,9 @@ export default function RoutineBookPage() {
     let totalTransferred = 0;
     let saldoKas = 0;
     let saldoArisan = 0;
+    const categorySaldo = new Map<string, number>();
 
+    // First, add the checklist-based saldo
     for (let p = 0; p < periodCount; p++) {
       const periodKey =
         frequency === "bulanan" ? getPeriodKey(p) : getArisanPeriodKey(p);
@@ -854,26 +931,60 @@ export default function RoutineBookPage() {
 
           const amount = (checklist.count ?? 1) * category.amount;
           if (checklist.transferred) {
-            totalTransferred += amount;
             continue;
           }
 
           totalSaldo += amount;
           if (categoryType === "kas") saldoKas += amount;
           if (categoryType === "arisan") saldoArisan += amount;
+          categorySaldo.set(
+            category.id,
+            (categorySaldo.get(category.id) ?? 0) + amount,
+          );
         }
       }
     }
 
-    saldoKas += routineCashSummary.saldo;
-    saldoArisan -= arisanEntrySummary.totalNominal;
-    totalSaldo += routineCashSummary.saldo - arisanEntrySummary.totalNominal;
+    // Update per-category saldo with cash entries, and backward-compatible totals
+    const kasCategory = displayCategories.find(c =>
+      c.name.trim().toLowerCase().includes("kas")
+    );
+    for (const category of displayCategories) {
+      const categoryType = classifyCategory(category.name);
+      let currentSaldo = categorySaldo.get(category.id) ?? 0;
+
+      // Add cash entries for this category, handling legacy "kas" fallback
+      let masuk = 0;
+      let keluar = 0;
+      for (const entry of routineCashEntries) {
+        const entryCategory = entry.categoryId === "kas"
+          ? (kasCategory?.id ?? "kas")
+          : entry.categoryId;
+        if (entryCategory !== category.id) continue;
+        if (entry.type === "masuk") masuk += entry.amount;
+        else keluar += entry.amount;
+      }
+      currentSaldo += masuk - keluar;
+
+      categorySaldo.set(category.id, currentSaldo);
+
+      // Update the backward-compatible totals
+      if (categoryType === "kas") {
+        saldoKas += masuk - keluar;
+      }
+      if (categoryType === "arisan") {
+        saldoArisan += masuk - keluar;
+      }
+    }
+
+    // Total saldo = jumlah semua saldo per kategori
+    totalSaldo = Array.from(categorySaldo.values()).reduce((sum, v) => sum + v, 0);
 
     return {
       totalSaldo,
-      totalTransferred,
       saldoKas,
       saldoArisan,
+      categorySaldo,
     };
   }, [
     displayMembers,
@@ -883,8 +994,7 @@ export default function RoutineBookPage() {
     frequency,
     selectedSessionId,
     periodCount,
-    routineCashSummary,
-    arisanEntrySummary,
+    routineCashEntries,
   ]);
 
   const visibleMembersWithCategories = useMemo(
@@ -1000,16 +1110,21 @@ export default function RoutineBookPage() {
     }
   };
 
-  const resetCashEntryForm = () => {
+  const resetCashEntryForm = (categoryId: string = "") => {
     setCashEntryForm({
       date: todayISO(),
       type: "masuk",
       amount: "",
       note: "",
+      categoryId,
     });
   };
 
-  const handleOpenCashSaldoModal = () => {
+  const handleOpenCashSaldoModal = (category?: RoutineCategory) => {
+    if (category) {
+      setSelectedCategoryForModal(category);
+      resetCashEntryForm(category.id);
+    }
     setOpenCashSaldoModal(true);
   };
 
@@ -1059,24 +1174,30 @@ export default function RoutineBookPage() {
   };
 
   const handleOpenCashEntryModal = () => {
-    resetCashEntryForm();
+    // If we have a selected category, use its ID
+    if (selectedCategoryForModal) {
+      resetCashEntryForm(selectedCategoryForModal.id);
+    } else {
+      resetCashEntryForm();
+    }
     setOpenCashEntryModal(true);
   };
 
   const handleSaveCashEntry = async () => {
     const amount = Number(cashEntryForm.amount.replace(/\D/g, "")) || 0;
-    if (!cashEntryForm.date || amount <= 0) return;
+    if (!cashEntryForm.date || !cashEntryForm.categoryId || amount <= 0) return;
 
     setSavingCashEntry(true);
     try {
       await addRoutineCashEntry(safeBookId, {
+        categoryId: cashEntryForm.categoryId,
         date: cashEntryForm.date,
         type: cashEntryForm.type,
         amount,
         note: cashEntryForm.note.trim(),
       });
       await refreshData();
-      resetCashEntryForm();
+      resetCashEntryForm(selectedCategoryForModal?.id);
       setOpenCashEntryModal(false);
     } finally {
       setSavingCashEntry(false);
@@ -1090,6 +1211,38 @@ export default function RoutineBookPage() {
       await refreshData();
     } finally {
       setDeletingCashEntryId(null);
+    }
+  };
+
+  const handleOpenEditCashEntry = (entry: RoutineCashEntry) => {
+    setEditingCashEntry(entry);
+    setEditCashEntryForm({
+      date: entry.date,
+      type: entry.type,
+      amount: String(entry.amount),
+      note: entry.note ?? "",
+      categoryId: entry.categoryId ?? "",
+    });
+  };
+
+  const handleSaveEditCashEntry = async () => {
+    if (!editingCashEntry) return;
+    const amount = Number(editCashEntryForm.amount.replace(/\D/g, "")) || 0;
+    if (!editCashEntryForm.date || !editCashEntryForm.categoryId || amount <= 0) return;
+
+    setSavingEditCashEntry(true);
+    try {
+      await updateRoutineCashEntry(safeBookId, editingCashEntry.id, {
+        date: editCashEntryForm.date,
+        type: editCashEntryForm.type,
+        amount,
+        note: editCashEntryForm.note.trim(),
+        categoryId: editCashEntryForm.categoryId,
+      });
+      await refreshData();
+      setEditingCashEntry(null);
+    } finally {
+      setSavingEditCashEntry(false);
     }
   };
 
@@ -1195,52 +1348,67 @@ export default function RoutineBookPage() {
         </Card>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <button
-              type="button"
-              onClick={handleOpenCashSaldoModal}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left hover:shadow-md hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-800"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Saldo Kas
-                  </div>
-                  <div className="mt-1 text-base font-semibold text-emerald-600 dark:text-emerald-400">
-                    {formatIDR(saldoSummary.saldoKas)}
+          <div
+            ref={saldoScrollContainerRef}
+            onMouseDown={handleSaldoMouseDown}
+            onMouseLeave={handleMouseLeave}
+            onMouseUp={handleMouseUp}
+            onMouseMove={handleSaldoMouseMove}
+            className={`flex gap-3 overflow-x-auto pb-2 select-none ${
+              isSaldoDragging ? "cursor-grabbing" : "cursor-grab"
+            }`}
+            style={{
+              scrollbarWidth: "none", // Firefox
+              msOverflowStyle: "none", // IE/Edge
+            }}
+          >
+            <style>
+              {`
+                ::-webkit-scrollbar {
+                  display: none;
+                }
+              `}
+            </style>
+            {displayCategories.map((category) => {
+              const categoryType = (() => {
+                const normalized = category.name.trim().toLowerCase();
+                if (normalized.includes("arisan")) return "arisan";
+                return "kas";
+              })();
+              
+              const colorClass = categoryType === "kas" 
+                ? "text-emerald-600 dark:text-emerald-400" 
+                : "text-violet-600 dark:text-violet-400";
+              
+              const hoverClass = categoryType === "kas" 
+                ? "hover:border-emerald-300" 
+                : "hover:border-violet-300";
+              
+              const categorySaldo = saldoSummary.categorySaldo.get(category.id) ?? 0;
+
+              return (
+                <div
+                  key={category.id}
+                  onClick={() => handleSaldoCardClick(() => handleOpenCashSaldoModal(category))}
+                  className={`min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left ${hoverClass} dark:border-slate-700 dark:bg-slate-800 cursor-pointer`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                        Saldo {category.name}
+                      </div>
+                      <div className={`mt-1 text-base font-semibold ${colorClass}`}>
+                        {formatIDR(categorySaldo)}
+                      </div>
+                    </div>
+                    <span className={`text-[10px] font-medium uppercase tracking-wide ${colorClass}`}>
+                      Klik
+                    </span>
                   </div>
                 </div>
-                <span className="text-[10px] font-medium uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
-                  Klik
-                </span>
-              </div>
-              <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
-                Lihat tabel pemasukan & pengeluaran kas
-              </div>
-            </button>
-            <button
-              type="button"
-              onClick={handleOpenArisanStatusModal}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left hover:shadow-md hover:border-violet-300 dark:border-slate-700 dark:bg-slate-800"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Saldo Arisan
-                  </div>
-                  <div className="mt-1 text-base font-semibold text-violet-600 dark:text-violet-400">
-                    {formatIDR(saldoSummary.saldoArisan)}
-                  </div>
-                </div>
-                <span className="text-[10px] font-medium uppercase tracking-wide text-violet-600 dark:text-violet-400">
-                  Klik
-                </span>
-              </div>
-              <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
-                Catat siapa yang sudah dapat / belum
-              </div>
-            </button>
-            <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              );
+            })}
+            <div className="min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 Total Saldo
               </div>
@@ -1937,96 +2105,125 @@ export default function RoutineBookPage() {
       >
         <div className="grid gap-4">
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Atur anggota sesi lewat 2 tab. User aktif akan otomatis masuk sesi
-            jika dicentang minimal di salah satu tab.
+            Atur anggota lewat tab kategori. User aktif akan otomatis tersimpan jika dicentang minimal di salah satu tab.
           </div>
-
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setSessionMemberSettingsTab("kas")}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                sessionMemberSettingsTab === "kas"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              Setting Kas
-            </button>
-            <button
-              type="button"
-              onClick={() => setSessionMemberSettingsTab("arisan")}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                sessionMemberSettingsTab === "arisan"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              Setting Arisan
-            </button>
-          </div>
-
-          <div className="max-h-96 overflow-auto">
-            {allProfiles.length === 0 ? (
-              <div className="px-4 py-6 text-center text-sm text-slate-500">
-                Belum ada user terdaftar
+          {availableSessionCategories.length > 0 ? (
+            <>
+              <div className="flex gap-2 overflow-x-auto">
+                {availableSessionCategories.map((category) => (
+                  <button
+                    key={category.id}
+                    type="button"
+                    onClick={() => setSessionMemberSettingsTab(category.id)}
+                    className={`px-3 py-2 text-sm font-medium whitespace-nowrap transition rounded-lg ${
+                      sessionMemberSettingsTab === category.id
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {category.name}
+                  </button>
+                ))}
               </div>
-            ) : (
-              <div className="grid gap-2">
-                {allProfiles.map((profile) => {
-                  const types = selectedSessionMemberTypes[profile.id] ?? {
-                    kas: true,
-                    arisan: true,
-                  };
-                  const isChecked =
-                    sessionMemberSettingsTab === "kas"
-                      ? types.kas
-                      : types.arisan;
 
-                  return (
-                    <label
-                      key={profile.id}
-                      className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() =>
-                          toggleSessionMemberType(
-                            profile.id,
-                            sessionMemberSettingsTab,
-                          )
-                        }
-                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-slate-900">
-                          {profile.full_name}
-                        </div>
-                        <div className="mt-1 flex gap-1">
-                          {types.kas ? (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                              Kas
-                            </span>
-                          ) : null}
-                          {types.arisan ? (
-                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                              Arisan
-                            </span>
-                          ) : null}
-                          {!types.kas && !types.arisan ? (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                              Tidak aktif
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </label>
-                  );
-                })}
+              <div className="max-h-96 overflow-auto">
+                {allProfiles.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-slate-500">
+                    Belum ada user terdaftar
+                  </div>
+                ) : (
+                  <div className="grid gap-2">
+                    {(() => {
+                      const allChecked = allProfiles.length > 0 && allProfiles.every(p => {
+                        const cats = selectedSessionMemberCategoryIds[p.id] || new Set();
+                        return cats.has(sessionMemberSettingsTab);
+                      });
+                      return (
+                        <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition">
+                          <input
+                            type="checkbox"
+                            checked={allChecked}
+                            onChange={() => {
+                              setSelectedSessionMemberCategoryIds(prev => {
+                                const next = { ...prev };
+                                const categoryId = sessionMemberSettingsTab;
+                                allProfiles.forEach(p => {
+                                  const current = next[p.id] || new Set();
+                                  const newCats = new Set(current);
+                                  if (allChecked) {
+                                    newCats.delete(categoryId);
+                                  } else {
+                                    newCats.add(categoryId);
+                                  }
+                                  next[p.id] = newCats;
+                                  // Update selected profiles
+                                  setSelectedProfileIds(prevIds => {
+                                    const nextIds = new Set(prevIds);
+                                    if (newCats.size === 0) {
+                                      nextIds.delete(p.id);
+                                    } else {
+                                      nextIds.add(p.id);
+                                    }
+                                    return nextIds;
+                                  });
+                                });
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                          />
+                          <span>Pilih Semua</span>
+                        </label>
+                      );
+                    })()}
+                    {allProfiles.map((profile) => {
+                      const memberCatIds = selectedSessionMemberCategoryIds[profile.id] || new Set();
+                      const isChecked = memberCatIds.has(sessionMemberSettingsTab);
+                      return (
+                        <label
+                          key={profile.id}
+                          className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleSessionMemberCategory(profile.id)}
+                            className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-sm font-medium text-slate-900">
+                              {profile.full_name}
+                            </div>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {availableSessionCategories.map((cat) => (
+                                memberCatIds.has(cat.id) && (
+                                  <span
+                                    key={cat.id}
+                                    className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                                  >
+                                    {cat.name}
+                                  </span>
+                                )
+                              ))}
+                              {memberCatIds.size === 0 && (
+                                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                                  Tidak aktif
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </>
+          ) : (
+            <div className="rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-700">
+              Silakan buat kategori sesi terlebih dahulu sebelum mengatur anggota.
+            </div>
+          )}
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
@@ -2144,278 +2341,18 @@ export default function RoutineBookPage() {
       </Modal>
 
       <Modal
-        open={openCashSaldoModal}
-        title="Mutasi Saldo Kas"
-        onClose={() => setOpenCashSaldoModal(false)}
-      >
-        <div className="grid gap-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Total Pemasukan
-              </div>
-              <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
-                {formatIDR(routineCashSummary.totalMasuk)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Total Pengeluaran
-              </div>
-              <div className="text-base font-semibold text-rose-600 dark:text-rose-400">
-                {formatIDR(routineCashSummary.totalKeluar)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Saldo Kas Saat Ini
-              </div>
-              <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
-                {formatIDR(saldoSummary.saldoKas)}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                Tabel Mutasi Saldo Kas
-              </div>
-              {userCanEdit && (
-                <Button onClick={handleOpenCashEntryModal}>Tambah</Button>
-              )}
-            </div>
-
-            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-              <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm">
-                <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
-                      Tanggal
-                    </th>
-                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
-                      Tipe
-                    </th>
-                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3">
-                      Keterangan
-                    </th>
-                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right whitespace-nowrap">
-                      Nominal
-                    </th>
-                    {userCanEdit && (
-                      <th className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center whitespace-nowrap">
-                        Aksi
-                      </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {routineCashEntries.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={userCanEdit ? 5 : 4}
-                        className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
-                      >
-                        Belum ada pemasukan/pengeluaran saldo kas.
-                      </td>
-                    </tr>
-                  ) : (
-                    routineCashEntries.map((entry) => (
-                      <tr
-                        key={entry.id}
-                        className="hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                      >
-                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap text-slate-900 dark:text-white">
-                          {entry.date}
-                        </td>
-                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-1 text-xs font-medium ${
-                              entry.type === "masuk"
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                                : "bg-rose-50 text-rose-700 dark:bg-rose-900/20 dark:text-rose-400"
-                            }`}
-                          >
-                            {entry.type === "masuk"
-                              ? "Pemasukan"
-                              : "Pengeluaran"}
-                          </span>
-                        </td>
-                        <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-600 dark:text-slate-300">
-                          {entry.note || "-"}
-                        </td>
-                        <td
-                          className={`border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-medium whitespace-nowrap ${
-                            entry.type === "masuk"
-                              ? "text-emerald-700 dark:text-emerald-400"
-                              : "text-rose-700 dark:text-rose-400"
-                          }`}
-                        >
-                          {entry.type === "masuk" ? "+" : "-"}
-                          {formatIDR(entry.amount)}
-                        </td>
-                        {userCanEdit && (
-                          <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteCashEntry(entry.id)}
-                              disabled={deletingCashEntryId === entry.id}
-                              className="inline-flex items-center justify-center rounded-lg bg-rose-50 dark:bg-rose-900/20 px-3 py-1.5 text-xs font-medium text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 disabled:opacity-60"
-                            >
-                              {deletingCashEntryId === entry.id
-                                ? "Menghapus..."
-                                : "Hapus"}
-                            </button>
-                          </td>
-                        )}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={openCashEntryModal}
-        title="Tambah Mutasi Kas"
-        onClose={() => setOpenCashEntryModal(false)}
-      >
-        <div className="grid gap-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-                Tanggal
-              </div>
-              <Input
-                type="date"
-                value={cashEntryForm.date}
-                onChange={(e) =>
-                  setCashEntryForm((prev) => ({
-                    ...prev,
-                    date: e.target.value,
-                  }))
-                }
-              />
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-                Tipe
-              </div>
-              <Select
-                value={cashEntryForm.type}
-                onChange={(e) =>
-                  setCashEntryForm((prev) => ({
-                    ...prev,
-                    type: e.target.value as TxType,
-                  }))
-                }
-              >
-                <option value="masuk">Pemasukan</option>
-                <option value="keluar">Pengeluaran</option>
-              </Select>
-            </div>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-2">
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-                Nominal
-              </div>
-              <Input
-                inputMode="numeric"
-                placeholder="Contoh: 50000"
-                value={cashEntryForm.amount}
-                onChange={(e) =>
-                  setCashEntryForm((prev) => ({
-                    ...prev,
-                    amount: e.target.value.replace(/\D/g, ""),
-                  }))
-                }
-              />
-              {cashEntryForm.amount && Number(cashEntryForm.amount) > 0 && (
-                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                  {formatIDR(Number(cashEntryForm.amount))}
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-                Keterangan
-              </div>
-              <Input
-                placeholder="Contoh: Beli konsumsi"
-                value={cashEntryForm.note}
-                onChange={(e) =>
-                  setCashEntryForm((prev) => ({
-                    ...prev,
-                    note: e.target.value,
-                  }))
-                }
-              />
-            </div>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setOpenCashEntryModal(false)}
-            >
-              Batal
-            </Button>
-            <Button
-              onClick={handleSaveCashEntry}
-              disabled={
-                savingCashEntry ||
-                !cashEntryForm.date ||
-                (Number(cashEntryForm.amount.replace(/\D/g, "")) || 0) <= 0
-              }
-            >
-              {savingCashEntry ? "Menyimpan..." : "Simpan"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
         open={openArisanStatusModal}
         title={`Saldo Arisan — ${currentArisanScope.label}`}
         onClose={() => setOpenArisanStatusModal(false)}
       >
         <div className="grid gap-4">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-1 gap-3">
             <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
               <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
                 Saldo Arisan
               </div>
               <div className="text-base font-semibold text-violet-600 dark:text-violet-400">
                 {formatIDR(saldoSummary.saldoArisan)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Total Nominal Terpakai
-              </div>
-              <div className="text-base font-semibold text-rose-600 dark:text-rose-400">
-                {formatIDR(arisanEntrySummary.totalNominal)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Total Saldo
-              </div>
-              <div className="text-base font-semibold text-slate-900 dark:text-white">
-                {formatIDR(saldoSummary.totalSaldo)}
-              </div>
-            </div>
-            <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-              <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-                Jumlah Data
-              </div>
-              <div className="text-base font-semibold text-slate-900 dark:text-white">
-                {arisanEntrySummary.rowCount} baris
               </div>
             </div>
           </div>
@@ -2579,62 +2516,12 @@ export default function RoutineBookPage() {
         }
         onClose={() => setOpenDetailModal(false)}
       >
-        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-              Saldo Kas
-            </div>
-            <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
-              {formatIDR(saldoSummary.saldoKas)}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-              Saldo Arisan
-            </div>
-            <div className="text-base font-semibold text-violet-600 dark:text-violet-400">
-              {formatIDR(saldoSummary.saldoArisan)}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-              Total Saldo
-            </div>
-            <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
-              {formatIDR(saldoSummary.totalSaldo)}
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
-            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
-              Sudah Ditransfer
-            </div>
-            <div className="text-base font-semibold text-blue-600 dark:text-blue-400">
-              {formatIDR(saldoSummary.totalTransferred)}
-            </div>
-          </div>
-        </div>
-        <div className="mb-3 flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-3.5 w-3.5 shrink-0"
-          >
-            <path d="M15 15l-2 5L9 9l11 4-5 2z" />
-          </svg>
-          Klik cell untuk transfer ke buku transaksi
-        </div>
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[50vh]">
           <table
             className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm"
             style={{ tableLayout: "fixed", minWidth: "600px" }}
           >
-            <colgroup>
-              <col style={{ width: "56px" }} />
+<colgroup>
               <col style={{ width: "100px" }} />
               {displayCategories.map((category) => (
                 <col key={category.id} style={{ width: "140px" }} />
@@ -2643,24 +2530,21 @@ export default function RoutineBookPage() {
             </colgroup>
             <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
               <tr>
-                <th className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center">
-                  No
-                </th>
                 <th
-                  className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3"
-                  style={{ left: "56px" }}
+                  className="sticky left-0 top-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3"
+                  style={{ left: "0" }}
                 >
-                  {frequency === "bulanan" ? "Bulan" : "Putaran"}
+                  {frequency === "bulanan" ? "Bulan" : "Pertemuan"}
                 </th>
                 {displayCategories.map((category) => (
                   <th
                     key={category.id}
-                    className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right"
+                    className="sticky top-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right"
                   >
                     {category.name}
                   </th>
                 ))}
-                <th className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right font-semibold">
+                <th className="sticky top-0 z-20 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right font-semibold">
                   Total
                 </th>
               </tr>
@@ -2670,7 +2554,7 @@ export default function RoutineBookPage() {
                 ? MONTH_NAMES
                 : Array.from(
                     { length: displayMembers.length },
-                    (_, i) => `Putaran ${i + 1}`,
+                    (_, i) => String(i + 1),
                   )
               ).map((periodName, periodIndex) => {
                 const periodKey =
@@ -2679,12 +2563,17 @@ export default function RoutineBookPage() {
                     : getArisanPeriodKey(periodIndex);
                 const categoryAmounts: Record<string, number> = {};
                 const categoryAmountsAll: Record<string, number> = {}; // Untuk tampilan (termasuk transferred)
+
+                // Cari kategori fallback untuk entry yang categoryId = "kas" (data lama)
+                const kasCategory = displayCategories.find(c =>
+                  c.name.trim().toLowerCase().includes("kas")
+                );
+
                 let periodTotal = 0;
 
                 // Calculate amounts for each category in this period
                 displayCategories.forEach((category) => {
-                  let categoryAmount = 0; // Untuk total (tidak termasuk transferred)
-                  let categoryAmountAll = 0; // Untuk tampilan (termasuk transferred)
+                  let categoryAmount = 0;
 
                   displayMembers.forEach((member) => {
                     if (!memberSupportsCategory(member, category)) return;
@@ -2693,23 +2582,17 @@ export default function RoutineBookPage() {
                       category.id,
                       periodKey,
                     );
-                    if (checklist?.checked && !checklist.notPaid) {
+                    if (checklist?.checked && !checklist.notPaid && !checklist.transferred) {
                       const count = checklist.count ?? 1;
-                      const amount = count * category.amount;
-
-                      // Untuk tampilan: hitung semua (termasuk transferred)
-                      categoryAmountAll += amount;
-
-                      // Untuk total: hanya yang belum ditransfer
-                      if (!checklist.transferred) {
-                        categoryAmount += amount;
-                      }
+                      categoryAmount += count * category.amount;
                     }
                   });
 
+                  // Cash entries are shown in separate "Mutasi Kas" row below
+
                   categoryAmounts[category.id] = categoryAmount;
-                  categoryAmountsAll[category.id] = categoryAmountAll;
-                  periodTotal += categoryAmount; // Total hanya yang belum ditransfer
+                  categoryAmountsAll[category.id] = categoryAmount;
+                  periodTotal += categoryAmount;
                 });
 
                 return (
@@ -2720,41 +2603,21 @@ export default function RoutineBookPage() {
                     <td className="sticky left-0 z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-center font-medium text-slate-500 dark:text-slate-400">
                       {periodIndex + 1}
                     </td>
-                    <td
-                      className="sticky z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 font-medium text-slate-900 dark:text-white"
-                      style={{ left: "56px" }}
-                    >
-                      {periodName}
-                    </td>
                     {displayCategories.map((category) => {
-                      const amount = categoryAmounts[category.id] || 0; // Untuk transfer (belum ditransfer)
-                      const displayAmount =
-                        categoryAmountsAll[category.id] || 0; // Untuk tampilan (semua)
+                      const amount = categoryAmounts[category.id] || 0;
                       const transferred = isTransferred(periodKey, category.id);
 
                       return (
                         <td
                           key={category.id}
-                          onClick={() =>
-                            handleCellClick(periodIndex, category.id, amount)
-                          }
                           className={`border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right ${
-                            amount > 0 && !transferred
-                              ? "cursor-pointer hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-700 dark:text-blue-400"
-                              : transferred
-                                ? "text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20"
-                                : "text-slate-700 dark:text-slate-300"
-                          }`}
-                          title={
                             transferred
-                              ? "Sudah ditransfer ke buku transaksi"
-                              : amount > 0
-                                ? "Klik untuk transfer ke buku transaksi"
-                                : ""
-                          }
+                              ? "text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20"
+                              : "text-slate-700 dark:text-slate-300"
+                          }`}
                         >
                           <div className="flex items-center justify-end gap-1">
-                            {formatIDR(displayAmount)}
+                            {formatIDR(amount)}
                             {transferred && (
                               <svg
                                 xmlns="http://www.w3.org/2000/svg"
@@ -2779,82 +2642,541 @@ export default function RoutineBookPage() {
                   </tr>
                 );
               })}
+              {/* Mutasi Kas row - for monthly (cash entries shown separately, filtered by year) */}
+              {frequency === "bulanan" && routineCashEntries.length > 0 && (() => {
+                const kasCategory = displayCategories.find(c =>
+                  c.name.trim().toLowerCase().includes("kas")
+                );
+
+                const netPerCategory = displayCategories.map((category) => {
+                  let masuk = 0;
+                  let keluar = 0;
+                  for (const entry of routineCashEntries) {
+                    const entryCategory = entry.categoryId === "kas"
+                      ? (kasCategory?.id ?? "kas")
+                      : entry.categoryId;
+                    if (entryCategory !== category.id) continue;
+                    const entryYear = Number(entry.date.slice(0, 4));
+                    if (entryYear !== selectedYear) continue;
+                    if (entry.type === "masuk") masuk += entry.amount;
+                    else keluar += entry.amount;
+                  }
+                  return { category, net: masuk - keluar };
+                });
+
+                const rowTotal = netPerCategory.reduce((sum, { net }) => sum + net, 0);
+                if (rowTotal === 0 && netPerCategory.every(({ net }) => net === 0)) return null;
+
+return (
+                   <tr className="bg-amber-50 dark:bg-amber-900/10 italic">
+                     <td className="sticky left-0 bottom-[49px] z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">
+                      Mutasi Kas
+                    </td>
+                    {netPerCategory.map(({ category, net }) => (
+                      <td
+                        key={category.id}
+                        onClick={() => handleOpenCashSaldoModal(category)}
+                        className={`sticky bottom-[49px] border-b border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-right text-sm font-medium cursor-pointer hover:brightness-95 ${
+                          net > 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : net < 0
+                              ? "text-rose-700 dark:text-rose-400"
+                              : "text-slate-400 dark:text-slate-500"
+                        }`}
+                      >
+                        {net !== 0 ? (net > 0 ? "+" : "") + formatIDR(net) : "-"}
+                      </td>
+                    ))}
+                    <td className={`sticky bottom-[49px] border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-right text-sm font-semibold ${
+                      rowTotal > 0
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : rowTotal < 0
+                          ? "text-rose-700 dark:text-rose-400"
+                          : "text-slate-400 dark:text-slate-500"
+                    }`}>
+                      {rowTotal !== 0 ? (rowTotal > 0 ? "+" : "") + formatIDR(rowTotal) : "-"}
+                    </td>
+                  </tr>
+                );
+              })()}
+              {/* Mutasi Kas row - for arisan only (cash entries are session-scoped) */}
+              {frequency === "arisan" && routineCashEntries.length > 0 && (() => {
+                const kasCategory = displayCategories.find(c =>
+                  c.name.trim().toLowerCase().includes("kas")
+                );
+
+                const netPerCategory = displayCategories.map((category) => {
+                  let masuk = 0;
+                  let keluar = 0;
+                  for (const entry of routineCashEntries) {
+                    const entryCategory = entry.categoryId === "kas"
+                      ? (kasCategory?.id ?? "kas")
+                      : entry.categoryId;
+                    if (entryCategory !== category.id) continue;
+                    if (entry.type === "masuk") masuk += entry.amount;
+                    else keluar += entry.amount;
+                  }
+                  return { category, net: masuk - keluar };
+                });
+
+                const rowTotal = netPerCategory.reduce((sum, { net }) => sum + net, 0);
+                if (rowTotal === 0 && netPerCategory.every(({ net }) => net === 0)) return null;
+
+return (
+                   <tr className="bg-amber-50 dark:bg-amber-900/10 italic">
+                     <td className="sticky left-0 bottom-[49px] z-20 border-b border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-sm font-medium text-slate-600 dark:text-slate-400">
+                      Mutasi Kas
+                    </td>
+                    {netPerCategory.map(({ category, net }) => (
+                      <td
+                        key={category.id}
+                        onClick={() => handleOpenCashSaldoModal(category)}
+                        className={`sticky bottom-[49px] border-b border-r border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-right text-sm font-medium cursor-pointer hover:brightness-95 ${
+                          net > 0
+                            ? "text-emerald-700 dark:text-emerald-400"
+                            : net < 0
+                              ? "text-rose-700 dark:text-rose-400"
+                              : "text-slate-400 dark:text-slate-500"
+                        }`}
+                      >
+                        {net !== 0 ? (net > 0 ? "+" : "") + formatIDR(net) : "-"}
+                      </td>
+                    ))}
+                    <td className={`sticky bottom-[49px] border-b border-slate-200 dark:border-slate-700 bg-amber-50 dark:bg-amber-900/10 px-4 py-3 text-right text-sm font-semibold ${
+                      rowTotal > 0
+                        ? "text-emerald-700 dark:text-emerald-400"
+                        : rowTotal < 0
+                          ? "text-rose-700 dark:text-rose-400"
+                          : "text-slate-400 dark:text-slate-500"
+                    }`}>
+                      {rowTotal !== 0 ? (rowTotal > 0 ? "+" : "") + formatIDR(rowTotal) : "-"}
+                    </td>
+                  </tr>
+                );
+              })()}
               <tr className="bg-slate-50 dark:bg-slate-900 font-semibold">
-                <td className="sticky left-0 z-20 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center text-slate-900 dark:text-white">
+                <td className="sticky left-0 bottom-0 z-20 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 font-medium text-slate-900 dark:text-white">
                   Total
                 </td>
-                <td
-                  className="sticky z-10 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3"
-                  style={{ left: "56px" }}
-                ></td>
                 {displayCategories.map((category) => {
-                  let categoryTotal = 0;
-                  for (let p = 0; p < periodCount; p++) {
-                    const periodKey =
-                      frequency === "bulanan"
-                        ? getPeriodKey(p)
-                        : getArisanPeriodKey(p);
-                    displayMembers.forEach((member) => {
-                      if (!memberSupportsCategory(member, category)) return;
-                      const checklist = getChecklistStatus(
-                        member.id,
-                        category.id,
-                        periodKey,
-                      );
-                      // Hanya hitung jika checked, tidak not_paid, dan belum ditransfer
-                      if (
-                        checklist?.checked &&
-                        !checklist.notPaid &&
-                        !checklist.transferred
-                      ) {
-                        const count = checklist.count ?? 1;
-                        categoryTotal += count * category.amount;
-                      }
-                    });
-                  }
+                  const categorySaldo = saldoSummary.categorySaldo.get(category.id) ?? 0;
                   return (
                     <td
                       key={category.id}
-                      className="border-t-2 border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400"
+                      className="sticky bottom-0 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400"
                     >
-                      {formatIDR(categoryTotal)}
+                      {formatIDR(categorySaldo)}
                     </td>
                   );
                 })}
-                <td className="border-t-2 border-slate-200 dark:border-slate-700 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400">
-                  {formatIDR(
-                    displayCategories.reduce((sum, category) => {
-                      let categoryTotal = 0;
-                      for (let p = 0; p < periodCount; p++) {
-                        const periodKey =
-                          frequency === "bulanan"
-                            ? getPeriodKey(p)
-                            : getArisanPeriodKey(p);
-                        displayMembers.forEach((member) => {
-                          if (!memberSupportsCategory(member, category)) return;
-                          const checklist = getChecklistStatus(
-                            member.id,
-                            category.id,
-                            periodKey,
-                          );
-                          // Hanya hitung jika checked, tidak not_paid, dan belum ditransfer
-                          if (
-                            checklist?.checked &&
-                            !checklist.notPaid &&
-                            !checklist.transferred
-                          ) {
-                            const count = checklist.count ?? 1;
-                            categoryTotal += count * category.amount;
-                          }
-                        });
-                      }
-                      return sum + categoryTotal;
-                    }, 0),
-                  )}
+                <td className="sticky bottom-0 border-t-2 border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400">
+                  {formatIDR(saldoSummary.totalSaldo)}
                 </td>
               </tr>
             </tbody>
           </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openCashSaldoModal}
+        title={selectedCategoryForModal ? `Mutasi Saldo ${selectedCategoryForModal.name}` : "Mutasi Saldo Kas"}
+        onClose={() => {
+          setOpenCashSaldoModal(false);
+          setSelectedCategoryForModal(null);
+        }}
+      >
+        <div className="grid gap-4">
+          <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+            <div className="mb-1 text-xs text-slate-500 dark:text-slate-400">
+              Saldo Saat Ini
+            </div>
+            <div className="text-base font-semibold text-emerald-600 dark:text-emerald-400">
+              {formatIDR(selectedCategoryForModal ? (saldoSummary.categorySaldo.get(selectedCategoryForModal.id) ?? 0) : saldoSummary.saldoKas)}
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                Tabel Mutasi Saldo
+              </div>
+              {userCanEdit && (
+                <Button onClick={handleOpenCashEntryModal}>Tambah</Button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
+              <table className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm">
+                <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                  <tr>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap">
+                      Tanggal
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3">
+                      Keterangan
+                    </th>
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right whitespace-nowrap">
+                      Nominal
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const filteredEntries = selectedCategoryForModal 
+                      ? routineCashEntries.filter(e => e.categoryId === selectedCategoryForModal.id)
+                      : routineCashEntries;
+                      
+                    return filteredEntries.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={3}
+                          className="px-4 py-8 text-center text-slate-400 dark:text-slate-500"
+                        >
+                          Belum ada pemasukan/pengeluaran untuk kategori ini.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredEntries.map((entry) => (
+                        <tr
+                          key={entry.id}
+                          className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${userCanEdit ? "cursor-pointer" : ""}`}
+                          onClick={() => userCanEdit && handleOpenEditCashEntry(entry)}
+                        >
+                          <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 whitespace-nowrap text-slate-900 dark:text-white">
+                            {entry.date}
+                          </td>
+                          <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-600 dark:text-slate-300">
+                            {entry.note || "-"}
+                          </td>
+                          <td
+                            className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-medium whitespace-nowrap ${
+                              entry.type === "masuk"
+                                ? "text-emerald-700 dark:text-emerald-400"
+                                : "text-rose-700 dark:text-rose-400"
+                            }`}
+                          >
+                            {entry.type === "masuk" ? "+" : "-"}
+                            {formatIDR(entry.amount)}
+                          </td>
+                        </tr>
+                      ))
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openCashEntryModal}
+        title="Tambah Mutasi"
+        onClose={() => setOpenCashEntryModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tanggal
+              </div>
+              <Input
+                type="date"
+                value={cashEntryForm.date}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    date: e.target.value,
+                  }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Kategori
+              </div>
+              <Select
+                value={cashEntryForm.categoryId}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    categoryId: e.target.value,
+                  }))
+                }
+              >
+                <option value="">Pilih kategori</option>
+                {displayCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+          
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tipe
+              </div>
+              <Select
+                value={cashEntryForm.type}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    type: e.target.value as TxType,
+                  }))
+                }
+              >
+                <option value="masuk">Pemasukan</option>
+                <option value="keluar">Pengeluaran</option>
+              </Select>
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nominal
+              </div>
+              <Input
+                inputMode="numeric"
+                placeholder="Contoh: 50000"
+                value={cashEntryForm.amount}
+                onChange={(e) =>
+                  setCashEntryForm((prev) => ({
+                    ...prev,
+                    amount: e.target.value.replace(/\D/g, ""),
+                  }))
+                }
+              />
+              {cashEntryForm.amount && Number(cashEntryForm.amount) > 0 && (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {formatIDR(Number(cashEntryForm.amount))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Keterangan
+            </div>
+            <Input
+              placeholder="Contoh: Beli konsumsi"
+              value={cashEntryForm.note}
+              onChange={(e) =>
+                setCashEntryForm((prev) => ({
+                  ...prev,
+                  note: e.target.value,
+                }))
+              }
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenCashEntryModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={handleSaveCashEntry}
+              disabled={
+                savingCashEntry ||
+                !cashEntryForm.date ||
+                !cashEntryForm.categoryId ||
+                (Number(cashEntryForm.amount.replace(/\D/g, "")) || 0) <= 0
+              }
+            >
+              {savingCashEntry ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!editingCashEntry}
+        title="Edit Transaksi"
+        onClose={() => setEditingCashEntry(null)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tanggal
+              </div>
+              <Input
+                type="date"
+                value={editCashEntryForm.date}
+                onChange={(e) =>
+                  setEditCashEntryForm((prev) => ({ ...prev, date: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Kategori
+              </div>
+              <Select
+                value={editCashEntryForm.categoryId}
+                onChange={(e) =>
+                  setEditCashEntryForm((prev) => ({ ...prev, categoryId: e.target.value }))
+                }
+              >
+                <option value="">Pilih kategori</option>
+                {displayCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Tipe
+              </div>
+              <Select
+                value={editCashEntryForm.type}
+                onChange={(e) =>
+                  setEditCashEntryForm((prev) => ({
+                    ...prev,
+                    type: e.target.value as TxType,
+                  }))
+                }
+              >
+                <option value="masuk">Pemasukan</option>
+                <option value="keluar">Pengeluaran</option>
+              </Select>
+            </div>
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nominal
+              </div>
+              <Input
+                inputMode="numeric"
+                placeholder="Contoh: 50000"
+                value={editCashEntryForm.amount}
+                onChange={(e) =>
+                  setEditCashEntryForm((prev) => ({
+                    ...prev,
+                    amount: e.target.value.replace(/\D/g, ""),
+                  }))
+                }
+              />
+              {editCashEntryForm.amount && Number(editCashEntryForm.amount) > 0 && (
+                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  {formatIDR(Number(editCashEntryForm.amount))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Keterangan
+            </div>
+            <Input
+              placeholder="Contoh: Beli konsumsi"
+              value={editCashEntryForm.note}
+              onChange={(e) =>
+                setEditCashEntryForm((prev) => ({ ...prev, note: e.target.value }))
+              }
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!editingCashEntry) return;
+                setConfirmDeleteCashEntryId(editingCashEntry.id);
+                setEditingCashEntry(null);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 px-3 py-2 text-sm font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-4 w-4"
+              >
+                <path d="M3 6h18" />
+                <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+              Hapus
+            </button>
+            <div className="flex gap-2">
+              <Button variant="secondary" onClick={() => setEditingCashEntry(null)}>
+                Batal
+              </Button>
+              <Button
+                onClick={handleSaveEditCashEntry}
+                disabled={
+                  savingEditCashEntry ||
+                  !editCashEntryForm.date ||
+                  !editCashEntryForm.categoryId ||
+                  (Number(editCashEntryForm.amount.replace(/\D/g, "")) || 0) <= 0
+                }
+              >
+                {savingEditCashEntry ? "Menyimpan..." : "Simpan"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={!!confirmDeleteCashEntryId}
+        title="Konfirmasi Hapus"
+        onClose={() => setConfirmDeleteCashEntryId(null)}
+      >
+        <div className="grid gap-5">
+          <div className="flex items-start gap-3 rounded-xl bg-rose-50 dark:bg-rose-900/20 px-4 py-3">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5"
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            <div className="text-sm text-rose-700 dark:text-rose-300">
+              Yakin ingin menghapus transaksi ini? Tindakan ini tidak dapat dibatalkan.
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmDeleteCashEntryId(null)}
+            >
+              Batal
+            </Button>
+            <Button
+              variant="danger"
+              onClick={async () => {
+                if (!confirmDeleteCashEntryId) return;
+                const id = confirmDeleteCashEntryId;
+                setConfirmDeleteCashEntryId(null);
+                await handleDeleteCashEntry(id);
+              }}
+            >
+              Hapus
+            </Button>
+          </div>
         </div>
       </Modal>
 
@@ -2938,6 +3260,7 @@ export default function RoutineBookPage() {
         )}
       </Modal>
 
+      {/* Cash Saldo Detail Modal */}
       {/* Success Modal */}
       <SuccessModal
         open={openSuccessModal}

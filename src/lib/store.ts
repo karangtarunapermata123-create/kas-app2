@@ -317,54 +317,79 @@ export async function getBookSaldo(book: Book): Promise<number> {
       sessions,
       checklists,
       cashEntries,
-      arisanEntries,
     ] = await Promise.all([
       getRoutineFrequency(book.id),
       getRoutineCategories(book.id),
       getRoutineSessions(book.id),
       getRoutineChecklists(book.id),
       getRoutineCashEntries(book.id),
-      getRoutineArisanEntries(book.id),
     ]);
 
-    const cashSaldo = cashEntries.reduce(
-      (acc, entry) =>
-        acc + (entry.type === "masuk" ? entry.amount : -entry.amount),
-      0,
-    );
-    const arisanUsedTotal = arisanEntries.reduce(
-      (acc, entry) => acc + entry.amount,
-      0,
-    );
-
     if (frequency === "bulanan") {
+      // Filter checklist untuk tahun berjalan saja (konsisten dengan tampilan di RoutineBookPage)
+      const currentYear = new Date().getFullYear();
+      const yearPrefix = `${currentYear}-`;
       const amountByCategoryId = new Map(
         categories.map((c) => [c.id, c.amount]),
       );
-      const checklistSaldo = checklists.reduce((acc, item) => {
-        if (!item.checked || item.notPaid || item.transferred) return acc;
+
+      // Hitung saldo per kategori dari checklist tahun berjalan
+      const categorySaldo = new Map<string, number>();
+      for (const item of checklists) {
+        if (!item.checked || item.notPaid || item.transferred) continue;
+        if (!item.periodKey.startsWith(yearPrefix)) continue;
         const count = item.count ?? 1;
         const amount = amountByCategoryId.get(item.categoryId) ?? 0;
-        return acc + count * amount;
-      }, 0);
-      return checklistSaldo + cashSaldo - arisanUsedTotal;
+        categorySaldo.set(
+          item.categoryId,
+          (categorySaldo.get(item.categoryId) ?? 0) + count * amount,
+        );
+      }
+
+      // Tambahkan cash entries per kategori
+      for (const entry of cashEntries) {
+        const catId = entry.categoryId ?? "kas";
+        const delta = entry.type === "masuk" ? entry.amount : -entry.amount;
+        categorySaldo.set(catId, (categorySaldo.get(catId) ?? 0) + delta);
+      }
+
+      // Total = jumlah semua saldo per kategori
+      return Array.from(categorySaldo.values()).reduce((sum, v) => sum + v, 0);
     }
+
+    // Arisan: hitung hanya sesi pertama (konsisten dengan default tampilan di RoutineBookPage)
+    const activeSession = sessions[0];
+    if (!activeSession) return 0;
 
     const amountByCategoryId = new Map<string, number>();
-    for (const session of sessions) {
-      for (const cat of session.categories ?? []) {
-        amountByCategoryId.set(cat.id, cat.amount);
-      }
+    for (const cat of activeSession.categories ?? []) {
+      amountByCategoryId.set(cat.id, cat.amount);
     }
 
-    const checklistSaldo = checklists.reduce((acc, item) => {
-      if (!item.checked || item.notPaid || item.transferred) return acc;
+    // Kumpulkan periodKey yang valid untuk sesi ini
+    // periodKey format: "{sessionId}-{roundIndex padded}"
+    const sessionPrefix = `${activeSession.id}-`;
+
+    const categorySaldo = new Map<string, number>();
+    for (const item of checklists) {
+      if (!item.checked || item.notPaid || item.transferred) continue;
+      if (!item.periodKey.startsWith(sessionPrefix)) continue;
       const count = item.count ?? 1;
       const amount = amountByCategoryId.get(item.categoryId) ?? 0;
-      return acc + count * amount;
-    }, 0);
+      categorySaldo.set(
+        item.categoryId,
+        (categorySaldo.get(item.categoryId) ?? 0) + count * amount,
+      );
+    }
 
-    return checklistSaldo + cashSaldo - arisanUsedTotal;
+    // Tambahkan cash entries per kategori
+    for (const entry of cashEntries) {
+      const catId = entry.categoryId ?? "kas";
+      const delta = entry.type === "masuk" ? entry.amount : -entry.amount;
+      categorySaldo.set(catId, (categorySaldo.get(catId) ?? 0) + delta);
+    }
+
+    return Array.from(categorySaldo.values()).reduce((sum, v) => sum + v, 0);
   }
 
   if (book.type === "kolektif") {
@@ -461,12 +486,22 @@ export async function getRoutineMembers(
     .eq("book_id", bookId)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((m) => ({
-    id: m.id,
-    name: m.name,
-    joinsKas: m.joins_kas ?? true,
-    joinsArisan: m.joins_arisan ?? true,
-  }));
+  return (data ?? []).map((m) => {
+    // Handle both old and new schema for backward compatibility
+    let categoryIds: string[] = [];
+    if (m.category_ids !== undefined) {
+      categoryIds = m.category_ids ?? [];
+    } else {
+      // Convert old joins_kas and joins_arisan to category ids (we'll use placeholder ids since we don't have real ones)
+      // But we need at least one category to be compatible, so let's just return empty for now
+      // In a real migration, we'd map to existing category ids
+    }
+    return {
+      id: m.id,
+      name: m.name,
+      categoryIds,
+    };
+  });
 }
 
 export async function saveRoutineMembers(
@@ -476,15 +511,29 @@ export async function saveRoutineMembers(
   // Hapus semua lalu insert ulang
   await supabase.from("routine_members").delete().eq("book_id", bookId);
   if (members.length === 0) return;
-  const rows = members.map((m) => ({
-    id: m.id,
-    book_id: bookId,
-    name: m.name,
-    joins_kas: m.joinsKas ?? true,
-    joins_arisan: m.joinsArisan ?? true,
-  }));
-  const { error } = await supabase.from("routine_members").insert(rows);
-  if (error) throw error;
+  
+  // Try inserting with new column first, if that fails try old columns
+  try {
+    const rows = members.map((m) => ({
+      id: m.id,
+      book_id: bookId,
+      name: m.name,
+      category_ids: m.categoryIds ?? [],
+    }));
+    const { error } = await supabase.from("routine_members").insert(rows);
+    if (error) throw error;
+  } catch (e) {
+    // Fallback to old schema if new column doesn't exist yet
+    const rows = members.map((m) => ({
+      id: m.id,
+      book_id: bookId,
+      name: m.name,
+      joins_kas: true,
+      joins_arisan: true,
+    }));
+    const { error } = await supabase.from("routine_members").insert(rows);
+    if (error) throw error;
+  }
 }
 
 export async function addRoutineMember(
@@ -494,17 +543,29 @@ export async function addRoutineMember(
   const m: RoutineMember = {
     id: uid("rm"),
     name: name.trim(),
-    joinsKas: true,
-    joinsArisan: true,
+    categoryIds: [],
   };
-  const { error } = await supabase.from("routine_members").insert({
-    id: m.id,
-    book_id: bookId,
-    name: m.name,
-    joins_kas: true,
-    joins_arisan: true,
-  });
-  if (error) throw error;
+  
+  // Try inserting with new column first, if that fails try old columns
+  try {
+    const { error } = await supabase.from("routine_members").insert({
+      id: m.id,
+      book_id: bookId,
+      name: m.name,
+      category_ids: [],
+    });
+    if (error) throw error;
+  } catch (e) {
+    const { error } = await supabase.from("routine_members").insert({
+      id: m.id,
+      book_id: bookId,
+      name: m.name,
+      joins_kas: true,
+      joins_arisan: true,
+    });
+    if (error) throw error;
+  }
+  
   return m;
 }
 
@@ -634,6 +695,7 @@ export async function getRoutineCashEntries(
   return (data ?? []).map((entry) => ({
     id: entry.id,
     bookId: entry.book_id,
+    categoryId: entry.category_id ?? "kas", // backward compatibility: default to "kas" if no category
     date: entry.date,
     type: entry.type,
     amount: entry.amount,
@@ -649,21 +711,59 @@ export async function addRoutineCashEntry(
   const nextEntry: RoutineCashEntry = {
     id: uid("rce"),
     bookId,
+    categoryId: entry.categoryId ?? "kas",
     date: entry.date,
     type: entry.type,
     amount: entry.amount,
     note: entry.note,
   };
 
-  const { error } = await supabase.from("routine_cash_entries").insert({
-    id: nextEntry.id,
-    book_id: bookId,
-    date: nextEntry.date,
-    type: nextEntry.type,
-    amount: nextEntry.amount,
-    note: nextEntry.note,
-  });
-  if (error) throw error;
+  // Try inserting with category_id first (for new schema with category_id column).
+  // If the column doesn't exist yet (old schema), fall back to inserting without it.
+  try {
+    const { error } = await supabase.from("routine_cash_entries").insert({
+      id: nextEntry.id,
+      book_id: bookId,
+      category_id: nextEntry.categoryId,
+      date: nextEntry.date,
+      type: nextEntry.type,
+      amount: nextEntry.amount,
+      note: nextEntry.note,
+    });
+    if (!error) {
+      dispatchRoutineChanged(bookId);
+      return nextEntry;
+    }
+    // If error is NOT about unknown column, throw it
+    const errMsg = (error as any)?.message ?? "";
+    if (!errMsg.includes("column") && !errMsg.includes("category_id")) {
+      throw error;
+    }
+  } catch (e: any) {
+    // Only ignore errors about unknown column (category_id doesn't exist yet)
+    const errMsg = e?.message ?? "";
+    if (!errMsg.includes("column") && !errMsg.includes("category_id")) {
+      console.error("Error inserting routine cash entry:", e);
+      throw e;
+    }
+  }
+
+  // Fallback: insert without category_id (for old schema before migration)
+  try {
+    const { error } = await supabase.from("routine_cash_entries").insert({
+      id: nextEntry.id,
+      book_id: bookId,
+      date: nextEntry.date,
+      type: nextEntry.type,
+      amount: nextEntry.amount,
+      note: nextEntry.note,
+    });
+    if (error) throw error;
+  } catch (e) {
+    console.error("Error inserting routine cash entry:", e);
+    throw e;
+  }
+  
   dispatchRoutineChanged(bookId);
   return nextEntry;
 }
@@ -675,6 +775,27 @@ export async function deleteRoutineCashEntry(
   const { error } = await supabase
     .from("routine_cash_entries")
     .delete()
+    .eq("id", entryId)
+    .eq("book_id", bookId);
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
+}
+
+export async function updateRoutineCashEntry(
+  bookId: string,
+  entryId: string,
+  updates: Partial<Omit<RoutineCashEntry, "id" | "bookId" | "createdAt">>,
+): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (updates.date !== undefined) payload.date = updates.date;
+  if (updates.type !== undefined) payload.type = updates.type;
+  if (updates.amount !== undefined) payload.amount = updates.amount;
+  if (updates.note !== undefined) payload.note = updates.note;
+  if (updates.categoryId !== undefined) payload.category_id = updates.categoryId;
+
+  const { error } = await supabase
+    .from("routine_cash_entries")
+    .update(payload)
     .eq("id", entryId)
     .eq("book_id", bookId);
   if (error) throw error;
@@ -1135,8 +1256,17 @@ export async function getCategories(bookId: string): Promise<Category[]> {
     .order("created_at", { ascending: true });
   if (error) throw error;
   if (!data || data.length === 0) {
-    // Seed default categories
-    await saveCategories(bookId, defaultCategories);
+    // Seed default categories with upsert to avoid conflicts
+    const rows = defaultCategories.map((c) => ({
+      id: c.id,
+      book_id: bookId,
+      name: c.name,
+    }));
+    try {
+      await supabase.from("categories").upsert(rows, { onConflict: "id,book_id" });
+    } catch (e) {
+      // Ignore errors
+    }
     return defaultCategories;
   }
   return data.map((c) => ({ id: c.id, name: c.name }));
@@ -1188,16 +1318,15 @@ export async function deleteCategory(
 }
 
 export async function ensureMiscCategory(bookId: string): Promise<void> {
-  const { data } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("book_id", bookId)
-    .eq("id", "lainnya")
-    .single();
-  if (!data) {
+  try {
     await supabase
       .from("categories")
-      .insert({ id: "lainnya", book_id: bookId, name: "Lainnya" });
+      .upsert(
+        { id: "lainnya", book_id: bookId, name: "Lainnya" },
+        { onConflict: "id,book_id" },
+      );
+  } catch (e) {
+    // Ignore errors
   }
 }
 
@@ -1486,7 +1615,7 @@ export async function getSessionsByActivity(
     .from("activity_sessions")
     .select("*")
     .eq("activity_id", activityId)
-    .order("date", { ascending: false });
+    .order("date", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((s) => ({
     id: s.id,

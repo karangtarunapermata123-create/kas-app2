@@ -134,7 +134,11 @@ function AttendanceTable({
                             canEdit
                               ? "hover:scale-110 cursor-pointer"
                               : "cursor-not-allowed opacity-60"
-                          } border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300`}
+                          } ${
+                            status === "tidak-hadir"
+                              ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                          }`}
                           aria-label="Ubah status kehadiran"
                         >
                           {status === "hadir"
@@ -1148,7 +1152,7 @@ export default function AbsensiPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold">
+                      <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 text-xs font-bold">
                         ✗
                       </span>
                       <span className="text-slate-600 dark:text-slate-400">
@@ -1318,7 +1322,11 @@ export default function AbsensiPage() {
                                             userCanEdit
                                               ? "hover:scale-110 cursor-pointer"
                                               : "cursor-not-allowed opacity-60"
-                                          } border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300`}
+                                          } ${
+                                            status === "tidak-hadir"
+                                              ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                          }`}
                                           aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
                                         >
                                           {status === "hadir"
@@ -1437,18 +1445,18 @@ export default function AbsensiPage() {
                 </>
               )}
 
-              {/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin */}
-              {userCanEdit && isRutin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSessionLabel(suggestSessionLabel(selectedActivity));
-                    setSessionDate(new Date().toISOString().split("T")[0]);
-                    setOpenAddSession(true);
-                  }}
-                  className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
-                  aria-label="Tambah Sesi"
-                >
+{/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin (di atas tombol Scan QR) */}
+                {userCanEdit && isRutin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSessionLabel(suggestSessionLabel(selectedActivity));
+                      setSessionDate(new Date().toISOString().split("T")[0]);
+                      setOpenAddSession(true);
+                    }}
+className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-[calc(1.5rem+56px+5px)]"
+                    aria-label="Tambah Sesi"
+                  >
                   <svg
                     viewBox="0 0 24 24"
                     fill="none"
@@ -1456,7 +1464,7 @@ export default function AbsensiPage() {
                     strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="h-7 w-7"
+                    className="h-5 w-5"
                     aria-hidden="true"
                   >
                     <path d="M12 5v14" />
@@ -1670,6 +1678,8 @@ export default function AbsensiPage() {
           </Modal>
         </div>
 
+        {renderQRMessage()}
+
         {/* QR Scanner - selalu dirender di luar grid */}
         <QRScanner
           key={qrScannerKey}
@@ -1677,8 +1687,6 @@ export default function AbsensiPage() {
           onClose={() => setOpenQRScanner(false)}
           onScan={handleScanQR}
         />
-
-        {renderQRMessage()}
       </>
     );
   }
@@ -1768,6 +1776,30 @@ export default function AbsensiPage() {
           )}
         </Card>
 
+        {/* FAB - Tambah Kegiatan (hanya admin, di atas tombol Scan QR) */}
+        {userCanEdit && (
+          <button
+            type="button"
+            aria-label="Tambah kegiatan"
+className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-20"
+            onClick={() => setOpenAddActivity(true)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-5 w-5"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+        )}
+
         {/* FAB - Scan QR (untuk semua user) */}
         {!openQRScanner && !openQRDisplay && (
           <button
@@ -1796,32 +1828,6 @@ export default function AbsensiPage() {
             </svg>
           </button>
         )}
-
-        {/* FAB - Tambah Kegiatan (hanya admin) */}
-        {userCanEdit && (
-          <button
-            type="button"
-            aria-label="Tambah kegiatan"
-            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-24 z-50 grid h-14 w-14 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-6 md:right-24"
-            onClick={() => setOpenAddActivity(true)}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-7 w-7"
-              aria-hidden="true"
-            >
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </button>
-        )}
-
-        {renderQRMessage()}
 
         {/* Modal tambah kegiatan */}
         <Modal
@@ -1999,15 +2005,17 @@ export default function AbsensiPage() {
             </div>
           </div>
         </Modal>
-      </div>
 
-      {/* QR Scanner - selalu dirender di luar grid */}
-      <QRScanner
-        key={qrScannerKey}
-        open={openQRScanner}
-        onClose={() => setOpenQRScanner(false)}
-        onScan={handleScanQR}
-      />
+        {renderQRMessage()}
+
+        {/* QR Scanner - selalu dirender di luar grid */}
+        <QRScanner
+          key={qrScannerKey}
+          open={openQRScanner}
+          onClose={() => setOpenQRScanner(false)}
+          onScan={handleScanQR}
+        />
+      </div>
     </>
   );
 }

@@ -88,12 +88,10 @@ export default function BukuKasPage() {
   const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(
     new Set(),
   );
-  const [selectedMemberTypes, setSelectedMemberTypes] = useState<
-    Record<string, { kas: boolean; arisan: boolean }>
-  >({});
-  const [memberSettingsTab, setMemberSettingsTab] = useState<"kas" | "arisan">(
-    "kas",
-  );
+  const [selectedMemberCategoryIds, setSelectedMemberCategoryIds] = useState<
+    Record<string, Set<string>>
+  >({}); // profileId -> Set of category ids
+  const [memberSettingsTab, setMemberSettingsTab] = useState<string>(""); // current category id
   const [isEditMode, setIsEditMode] = useState(false); // untuk membedakan add vs edit
 
   // State untuk modal kelola kategori
@@ -516,7 +514,7 @@ export default function BukuKasPage() {
   function addNewRoutineMemberRow() {
     setNewRoutineMembers((prev) => [
       ...prev,
-      { id: uid("rm"), name: "", joinsKas: true, joinsArisan: true },
+      { id: uid("rm"), name: "", categoryIds: newRoutineCategories.map(c => c.id) },
     ]);
   }
 
@@ -557,7 +555,7 @@ export default function BukuKasPage() {
   function addEditRoutineMemberRow() {
     setEditRoutineMembers((prev) => [
       ...prev,
-      { id: uid("rm"), name: "", joinsKas: true, joinsArisan: true },
+      { id: uid("rm"), name: "", categoryIds: editRoutineCategories.map(c => c.id) },
     ]);
   }
 
@@ -595,6 +593,11 @@ export default function BukuKasPage() {
     setEditRoutineCategories((prev) => prev.filter((c) => c.id !== id));
   }
 
+  // Get the current categories (for add or edit)
+  function getCurrentCategoriesForMemberModal() {
+    return isEditMode ? editRoutineCategories : newRoutineCategories;
+  }
+
   async function openMemberModalForAdd() {
     const profiles = await getAllProfiles();
     setAllProfiles(profiles);
@@ -606,21 +609,20 @@ export default function BukuKasPage() {
         .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
-    const types = Object.fromEntries(
-      profiles.map((p) => {
-        const existing = memberByName.get(p.full_name.trim().toLowerCase());
-        return [
-          p.id,
-          {
-            kas: existing?.joinsKas ?? true,
-            arisan: existing?.joinsArisan ?? true,
-          },
-        ];
-      }),
-    );
+    const currentCats = getCurrentCategoriesForMemberModal();
+    const categoryIds: Record<string, Set<string>> = {};
+    // Only set categoryIds for existing members
+    for (const p of profiles) {
+      const existing = memberByName.get(p.full_name.trim().toLowerCase());
+      if (existing) {
+        categoryIds[p.id] = new Set(existing.categoryIds);
+      }
+    }
     setSelectedProfileIds(selected);
-    setSelectedMemberTypes(types);
-    setMemberSettingsTab("kas");
+    setSelectedMemberCategoryIds(categoryIds);
+    if (newRoutineCategories.length > 0) {
+      setMemberSettingsTab(newRoutineCategories[0].id);
+    }
     setIsEditMode(false);
     setOpenMemberModal(true);
   }
@@ -636,21 +638,19 @@ export default function BukuKasPage() {
         .filter((p) => memberByName.has(p.full_name.trim().toLowerCase()))
         .map((p) => p.id),
     );
-    const types = Object.fromEntries(
-      profiles.map((p) => {
-        const existing = memberByName.get(p.full_name.trim().toLowerCase());
-        return [
-          p.id,
-          {
-            kas: existing?.joinsKas ?? true,
-            arisan: existing?.joinsArisan ?? true,
-          },
-        ];
-      }),
-    );
+    const categoryIds: Record<string, Set<string>> = {};
+    // Only set categoryIds for existing members
+    for (const p of profiles) {
+      const existing = memberByName.get(p.full_name.trim().toLowerCase());
+      if (existing) {
+        categoryIds[p.id] = new Set(existing.categoryIds);
+      }
+    }
     setSelectedProfileIds(selected);
-    setSelectedMemberTypes(types);
-    setMemberSettingsTab("kas");
+    setSelectedMemberCategoryIds(categoryIds);
+    if (editRoutineCategories.length > 0) {
+      setMemberSettingsTab(editRoutineCategories[0].id);
+    }
     setIsEditMode(true);
     setOpenMemberModal(true);
   }
@@ -665,34 +665,39 @@ export default function BukuKasPage() {
       }
       return next;
     });
-    setSelectedMemberTypes((prev) => ({
-      ...prev,
-      [profileId]: prev[profileId] ?? { kas: true, arisan: true },
-    }));
+    // If adding a new profile, initialize with empty categoryIds
+    setSelectedMemberCategoryIds((prev) => {
+      const next = { ...prev };
+      if (!next[profileId]) {
+        next[profileId] = new Set(); // Empty set initially
+      }
+      return next;
+    });
   }
 
-  function toggleMemberType(profileId: string, type: "kas" | "arisan") {
-    setSelectedMemberTypes((prev) => {
-      const current = prev[profileId] ?? { kas: true, arisan: true };
-      const next = {
-        kas: type === "kas" ? !current.kas : current.kas,
-        arisan: type === "arisan" ? !current.arisan : current.arisan,
-      };
-
+  function toggleMemberCategory(profileId: string) {
+    if (!memberSettingsTab) return;
+    setSelectedMemberCategoryIds((prev) => {
+      const next = { ...prev };
+      const currentCats = next[profileId] || new Set();
+      const newCats = new Set(currentCats);
+      if (newCats.has(memberSettingsTab)) {
+        newCats.delete(memberSettingsTab);
+      } else {
+        newCats.add(memberSettingsTab);
+      }
+      next[profileId] = newCats;
+      // Update selected profiles to include user if they have any categories
       setSelectedProfileIds((prevIds) => {
         const nextIds = new Set(prevIds);
-        if (next.kas || next.arisan) {
-          nextIds.add(profileId);
-        } else {
+        if (newCats.size === 0) {
           nextIds.delete(profileId);
+        } else {
+          nextIds.add(profileId);
         }
         return nextIds;
       });
-
-      return {
-        ...prev,
-        [profileId]: next,
-      };
+      return next;
     });
   }
 
@@ -702,15 +707,13 @@ export default function BukuKasPage() {
       currentMembers.map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
 
-    const selectedProfiles = allProfiles.filter((p) => {
-      const types = selectedMemberTypes[p.id];
-      return Boolean(types?.kas || types?.arisan);
-    });
+    const selectedProfiles = allProfiles.filter((p) =>
+      selectedProfileIds.has(p.id),
+    );
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
       id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
       name: p.full_name,
-      joinsKas: selectedMemberTypes[p.id]?.kas ?? true,
-      joinsArisan: selectedMemberTypes[p.id]?.arisan ?? true,
+      categoryIds: Array.from(selectedMemberCategoryIds[p.id] || []),
     }));
 
     if (isEditMode) {
@@ -723,9 +726,9 @@ export default function BukuKasPage() {
   }
 
   async function openCategoryModalForAdd() {
-    // Load kategori yang sudah ada dari newRoutineCategories
+    // Load kategori yang sudah ada dari newRoutineCategories, PRESERVE the original ids!
     const existingCategories = newRoutineCategories.map((c) => ({
-      id: uid("rc"), // Generate ID baru untuk modal
+      id: c.id,
       name: c.name,
       amount: c.amount,
     }));
@@ -740,9 +743,9 @@ export default function BukuKasPage() {
   }
 
   async function openCategoryModalForEdit() {
-    // Load kategori yang sudah ada dari editRoutineCategories
+    // Load kategori yang sudah ada dari editRoutineCategories, PRESERVE the original ids!
     const existingCategories = editRoutineCategories.map((c) => ({
-      id: uid("rc"), // Generate ID baru untuk modal
+      id: c.id,
       name: c.name,
       amount: c.amount,
     }));
@@ -773,7 +776,7 @@ export default function BukuKasPage() {
       selectedCategoryIds.has(c.id),
     );
     const categories: RoutineCategory[] = selectedCats.map((c) => ({
-      id: uid("rc"),
+      id: c.id, // PRESERVE the original id!
       name: c.name,
       amount: c.amount,
     }));
@@ -1279,91 +1282,132 @@ export default function BukuKasPage() {
       >
         <div className="grid gap-4">
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-            Atur anggota lewat 2 tab supaya lebih cepat. User aktif akan
-            otomatis tersimpan jika dicentang minimal di salah satu tab.
+            Atur anggota lewat tab kategori. User aktif akan otomatis tersimpan jika dicentang minimal di salah satu tab.
           </div>
+          {(() => {
+            const currentCategories = getCurrentCategoriesForMemberModal();
+            if (currentCategories.length > 0) {
+              return (
+                <>
+                  <div className="flex gap-2 overflow-x-auto">
+                    {currentCategories.map((category) => (
+                      <button
+                        key={category.id}
+                        type="button"
+                        onClick={() => setMemberSettingsTab(category.id)}
+                        className={`px-3 py-2 text-sm font-medium whitespace-nowrap transition rounded-lg ${
+                          memberSettingsTab === category.id
+                            ? "bg-slate-900 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {category.name}
+                      </button>
+                    ))}
+                  </div>
 
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setMemberSettingsTab("kas")}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                memberSettingsTab === "kas"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              Setting Kas
-            </button>
-            <button
-              type="button"
-              onClick={() => setMemberSettingsTab("arisan")}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition ${
-                memberSettingsTab === "arisan"
-                  ? "bg-slate-900 text-white"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-            >
-              Setting Arisan
-            </button>
-          </div>
-
-          <div className="max-h-96 overflow-auto">
-            {allProfiles.length === 0 ? (
-              <div className="px-4 py-6 text-center text-sm text-slate-500">
-                Belum ada user terdaftar
-              </div>
-            ) : (
-              <div className="grid gap-2">
-                {allProfiles.map((profile) => {
-                  const types = selectedMemberTypes[profile.id] ?? {
-                    kas: true,
-                    arisan: true,
-                  };
-                  const isChecked =
-                    memberSettingsTab === "kas" ? types.kas : types.arisan;
-
-                  return (
-                    <label
-                      key={profile.id}
-                      className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() =>
-                          toggleMemberType(profile.id, memberSettingsTab)
-                        }
-                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-slate-900">
-                          {profile.full_name}
-                        </div>
-                        <div className="mt-1 flex gap-1">
-                          {types.kas ? (
-                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
-                              Kas
-                            </span>
-                          ) : null}
-                          {types.arisan ? (
-                            <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-700">
-                              Arisan
-                            </span>
-                          ) : null}
-                          {!types.kas && !types.arisan ? (
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
-                              Tidak aktif
-                            </span>
-                          ) : null}
-                        </div>
+                  <div className="max-h-96 overflow-auto">
+                    {allProfiles.length === 0 ? (
+                      <div className="px-4 py-6 text-center text-sm text-slate-500">
+                        Belum ada user terdaftar
                       </div>
-                    </label>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                    ) : (
+                      <div className="grid gap-2">
+                        {(() => {
+                          const allChecked = allProfiles.length > 0 && allProfiles.every(p => {
+                            const cats = selectedMemberCategoryIds[p.id] || new Set();
+                            return cats.has(memberSettingsTab);
+                          });
+                          return (
+                            <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-medium text-slate-700 cursor-pointer hover:bg-slate-100 transition">
+                              <input
+                                type="checkbox"
+                                checked={allChecked}
+                                onChange={() => {
+                                  setSelectedMemberCategoryIds(prev => {
+                                    const next = { ...prev };
+                                    const categoryId = memberSettingsTab;
+                                    allProfiles.forEach(p => {
+                                      const current = next[p.id] || new Set();
+                                      const newCats = new Set(current);
+                                      if (allChecked) {
+                                        newCats.delete(categoryId);
+                                      } else {
+                                        newCats.add(categoryId);
+                                      }
+                                      next[p.id] = newCats;
+                                      // Update selected profiles
+                                      setSelectedProfileIds(prevIds => {
+                                        const nextIds = new Set(prevIds);
+                                        if (newCats.size === 0) {
+                                          nextIds.delete(p.id);
+                                        } else {
+                                          nextIds.add(p.id);
+                                        }
+                                        return nextIds;
+                                      });
+                                    });
+                                    return next;
+                                  });
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                              />
+                              <span>Pilih Semua</span>
+                            </label>
+                          );
+                        })()}
+                        {allProfiles.map((profile) => {
+                        const memberCatIds = selectedMemberCategoryIds[profile.id] || new Set();
+                        const isChecked = memberCatIds.has(memberSettingsTab);
+                        return (
+                          <label
+                            key={profile.id}
+                            className="flex items-center gap-3 rounded-lg border px-3 py-3 hover:bg-slate-50"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => toggleMemberCategory(profile.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-medium text-slate-900">
+                                {profile.full_name}
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                {currentCategories.map((cat) => (
+                                  memberCatIds.has(cat.id) && (
+                                    <span
+                                      key={cat.id}
+                                      className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600"
+                                    >
+                                      {cat.name}
+                                    </span>
+                                  )
+                                ))}
+                                {memberCatIds.size === 0 && (
+                                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">
+                                    Tidak aktif
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            } else {
+                return (
+                  <div className="rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-700">
+                    Silakan buat kategori terlebih dahulu sebelum mengatur anggota.
+                  </div>
+                );
+            }
+          })()}
 
           <div className="flex justify-end gap-2">
             <Button
