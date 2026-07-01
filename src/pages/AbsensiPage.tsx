@@ -107,7 +107,7 @@ function AttendanceTable({
                 </tr>
               </thead>
               <tbody>
-                {allProfiles.map((profile, i) => {
+                {[...allProfiles].sort((a, b) => a.full_name.localeCompare(b.full_name, "id")).map((profile, i) => {
                   const record = recordMap.get(
                     profile.full_name.toLowerCase().trim(),
                   );
@@ -1326,7 +1326,7 @@ export default function AbsensiPage() {
                             </td>
                           </tr>
                         ) : (
-                          allProfiles.map((profile, profileIndex) => {
+                          [...allProfiles].sort((a, b) => a.full_name.localeCompare(b.full_name, "id")).map((profile, profileIndex) => {
                             return (
                               <tr
                                 key={profile.id}
@@ -1451,6 +1451,22 @@ export default function AbsensiPage() {
                             </div>
                             {userCanEdit && (
                               <div className="flex gap-1 mt-2">
+                                {/* Tambah sesi */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenTooltipSessionId(null);
+                                    setOpenAddSession(true);
+                                  }}
+                                  className="flex items-center justify-center px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs font-medium transition"
+                                  aria-label="Tambah sesi"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                                    <path d="M12 5v14" /><path d="M5 12h14" />
+                                  </svg>
+                                </button>
+                                {/* Edit tanggal */}
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1458,12 +1474,14 @@ export default function AbsensiPage() {
                                     handleOpenEditSessionDate(session);
                                   }}
                                   className="flex items-center justify-center px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs font-medium transition"
+                                  aria-label="Ubah tanggal sesi"
                                 >
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
                                     <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                                     <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                   </svg>
                                 </button>
+                                {/* QR */}
                                 <button
                                   type="button"
                                   onClick={async (e) => {
@@ -1496,10 +1514,14 @@ export default function AbsensiPage() {
                                       alert("Gagal membuat QR code");
                                     }
                                   }}
-                                  className="flex-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
+                                  className="flex items-center justify-center px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
+                                  aria-label="QR sesi"
                                 >
-                                  🔲 QR
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                                    <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
+                                  </svg>
                                 </button>
+                                {/* Hapus */}
                                 <button
                                   type="button"
                                   onClick={(e) => {
@@ -1507,9 +1529,12 @@ export default function AbsensiPage() {
                                     setOpenTooltipSessionId(null);
                                     handleDeleteSession(session.id);
                                   }}
-                                  className="flex-1 px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition"
+                                  className="flex items-center justify-center px-2 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-medium transition"
+                                  aria-label="Hapus sesi"
                                 >
-                                  🗑️ Hapus
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                                    <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6" /><path d="M14 11v6" /><path d="M9 6V4h6v2" />
+                                  </svg>
                                 </button>
                               </div>
                             )}
@@ -1589,45 +1614,31 @@ export default function AbsensiPage() {
 
           {/* FAB - Scan QR (untuk semua user di detail kegiatan) */}
           {!openQRScanner && !openQRDisplay && (
-            <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 flex flex-col items-center gap-2 md:bottom-6">
-              {isRutin && userCanEdit && (
-                <button
-                  type="button"
-                  aria-label="Tambah sesi"
-                  className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600"
-                  onClick={() => setOpenAddSession(true)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
-                    <path d="M12 5v14" /><path d="M5 12h14" />
-                  </svg>
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label="Scan QR Code"
-                className="grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600"
-                onClick={() => {
-                  setQrScannerKey((k) => k + 1);
-                  setOpenQRScanner(true);
-                }}
+            <button
+              type="button"
+              aria-label="Scan QR Code"
+              className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+              onClick={() => {
+                setQrScannerKey((k) => k + 1);
+                setOpenQRScanner(true);
+              }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-7 w-7"
+                aria-hidden="true"
               >
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-7 w-7"
-                  aria-hidden="true"
-                >
-                  <rect x="3" y="3" width="7" height="7" />
-                  <rect x="14" y="3" width="7" height="7" />
-                  <rect x="14" y="14" width="7" height="7" />
-                  <rect x="3" y="14" width="7" height="7" />
-                </svg>
-              </button>
-            </div>
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
           )}
 
           {/* Modal tambah sesi */}
