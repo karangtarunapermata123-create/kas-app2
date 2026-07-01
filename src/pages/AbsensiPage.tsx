@@ -14,10 +14,12 @@ import { getAllProfiles } from "../lib/users";
 import {
   getActivities,
   addActivity,
+  updateActivity,
   deleteActivity,
   getSessionsByActivity,
   addActivitySession,
   deleteActivitySession,
+  updateActivitySession,
   getAttendanceByActivity,
   getAttendanceBySession,
   getAttendanceRecords,
@@ -331,6 +333,15 @@ export default function AbsensiPage() {
   );
   const [activityDescription, setActivityDescription] = useState("");
 
+  // Mode edit kegiatan (tampilkan kolom aksi hapus + rename)
+  const [editMode, setEditMode] = useState(false);
+  const [editFabOpen, setEditFabOpen] = useState(false);
+
+  // Modal: rename kegiatan
+  const [openRenameActivity, setOpenRenameActivity] = useState(false);
+  const [renameActivityId, setRenameActivityId] = useState<string | null>(null);
+  const [renameActivityValue, setRenameActivityValue] = useState("");
+
   // Modal: tambah sesi
   const [openAddSession, setOpenAddSession] = useState(false);
   const [sessionLabel, setSessionLabel] = useState("");
@@ -348,6 +359,11 @@ export default function AbsensiPage() {
   const [openDeleteSession, setOpenDeleteSession] = useState(false);
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
   const [deleteSessionLabel, setDeleteSessionLabel] = useState("");
+
+  // Modal: edit tanggal sesi
+  const [openEditSessionDate, setOpenEditSessionDate] = useState(false);
+  const [editSessionId, setEditSessionId] = useState<string | null>(null);
+  const [editSessionDate, setEditSessionDate] = useState("");
 
   // Modal: status
   const [openStatus, setOpenStatus] = useState(false);
@@ -452,6 +468,14 @@ export default function AbsensiPage() {
   useEffect(() => {
     loadRecords();
   }, [loadRecords]);
+
+  // Close FAB dropdown saat klik di luar
+  useEffect(() => {
+    if (!editFabOpen) return;
+    function handleClick() { setEditFabOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [editFabOpen]);
 
   // Close tooltip when clicking outside
   useEffect(() => {
@@ -675,6 +699,23 @@ export default function AbsensiPage() {
     setDeleteConfirmText("");
   }
 
+  function handleOpenRenameActivity(id: string, currentName: string) {
+    setRenameActivityId(id);
+    setRenameActivityValue(currentName);
+    setOpenRenameActivity(true);
+  }
+
+  async function handleConfirmRenameActivity() {
+    if (!renameActivityId || !renameActivityValue.trim()) return;
+    // Hanya update nama, data kehadiran tidak ikut terpengaruh
+    await updateActivity(renameActivityId, { name: renameActivityValue.trim() });
+    const data = await getActivities();
+    setActivities(data);
+    setOpenRenameActivity(false);
+    setRenameActivityId(null);
+    setRenameActivityValue("");
+  }
+
   // ── Sesi ────────────────────────────────────────────────────────────────
 
   async function handleAddSession() {
@@ -708,6 +749,23 @@ export default function AbsensiPage() {
     setSessions(data);
     setDeleteSessionId(null);
     setDeleteSessionLabel("");
+  }
+
+  function handleOpenEditSessionDate(session: ActivitySession) {
+    setEditSessionId(session.id);
+    setEditSessionDate(session.date);
+    setOpenTooltipSessionId(null);
+    setOpenEditSessionDate(true);
+  }
+
+  async function handleConfirmEditSessionDate() {
+    if (!editSessionId || !editSessionDate) return;
+    await updateActivitySession(editSessionId, { date: editSessionDate });
+    const data = await getSessionsByActivity(activityId!);
+    setSessions(data);
+    setOpenEditSessionDate(false);
+    setEditSessionId(null);
+    setEditSessionDate("");
   }
 
   // ── Anggota & Status ────────────────────────────────────────────────────
@@ -1395,6 +1453,19 @@ export default function AbsensiPage() {
                               <div className="flex gap-1 mt-2">
                                 <button
                                   type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenEditSessionDate(session);
+                                  }}
+                                  className="flex items-center justify-center px-2 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs font-medium transition"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={async (e) => {
                                     e.stopPropagation();
                                     setOpenTooltipSessionId(null);
@@ -1518,31 +1589,45 @@ export default function AbsensiPage() {
 
           {/* FAB - Scan QR (untuk semua user di detail kegiatan) */}
           {!openQRScanner && !openQRDisplay && (
-            <button
-              type="button"
-              aria-label="Scan QR Code"
-              className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-              onClick={() => {
-                setQrScannerKey((k) => k + 1);
-                setOpenQRScanner(true);
-              }}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-7 w-7"
-                aria-hidden="true"
+            <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 flex flex-col items-center gap-2 md:bottom-6">
+              {isRutin && userCanEdit && (
+                <button
+                  type="button"
+                  aria-label="Tambah sesi"
+                  className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600"
+                  onClick={() => setOpenAddSession(true)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                    <path d="M12 5v14" /><path d="M5 12h14" />
+                  </svg>
+                </button>
+              )}
+              <button
+                type="button"
+                aria-label="Scan QR Code"
+                className="grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600"
+                onClick={() => {
+                  setQrScannerKey((k) => k + 1);
+                  setOpenQRScanner(true);
+                }}
               >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
-            </button>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="h-7 w-7"
+                  aria-hidden="true"
+                >
+                  <rect x="3" y="3" width="7" height="7" />
+                  <rect x="14" y="3" width="7" height="7" />
+                  <rect x="14" y="14" width="7" height="7" />
+                  <rect x="3" y="14" width="7" height="7" />
+                </svg>
+              </button>
+            </div>
           )}
 
           {/* Modal tambah sesi */}
@@ -1586,6 +1671,48 @@ export default function AbsensiPage() {
                 <Button
                   onClick={handleAddSession}
                   disabled={!sessionLabel.trim()}
+                >
+                  Simpan
+                </Button>
+              </div>
+            </div>
+          </Modal>
+
+          {/* Modal edit tanggal sesi */}
+          <Modal
+            open={openEditSessionDate}
+            title="Ubah Tanggal Sesi"
+            onClose={() => {
+              setOpenEditSessionDate(false);
+              setEditSessionId(null);
+              setEditSessionDate("");
+            }}
+          >
+            <div className="grid gap-3">
+              <div>
+                <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Tanggal Baru
+                </div>
+                <Input
+                  type="date"
+                  value={editSessionDate}
+                  onChange={(e) => setEditSessionDate(e.target.value)}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setOpenEditSessionDate(false);
+                    setEditSessionId(null);
+                    setEditSessionDate("");
+                  }}
+                >
+                  Batal
+                </Button>
+                <Button
+                  onClick={handleConfirmEditSessionDate}
+                  disabled={!editSessionDate}
                 >
                   Simpan
                 </Button>
@@ -1710,7 +1837,9 @@ export default function AbsensiPage() {
                     <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tipe</th>
                     <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tanggal</th>
                     {userCanEdit && (
-                      <th className="py-3 pr-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Aksi</th>
+                      <th className="py-3 pr-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                        {editMode ? "Aksi" : ""}
+                      </th>
                     )}
                   </tr>
                 </thead>
@@ -1719,21 +1848,15 @@ export default function AbsensiPage() {
                     return (
                       <tr
                         key={activity.id}
-                        className={`cursor-pointer border-b border-slate-100 dark:border-slate-700/50 transition ${
+                        className={`border-b border-slate-200 dark:border-slate-700 transition ${
                           i % 2 === 0
-                            ? "bg-white dark:bg-slate-800"
-                            : "bg-slate-50/50 dark:bg-slate-800/50"
-                        } hover:bg-sky-50 dark:hover:bg-sky-900/20`}
-                        onClick={() => navigate(`/absensi/${activity.id}`)}
+                            ? "bg-slate-50 dark:bg-slate-800"
+                            : "bg-zinc-100/80 dark:bg-slate-700/30"
+                        } ${editMode ? "cursor-default" : "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/50"}`}
+                        onClick={() => !editMode && navigate(`/absensi/${activity.id}`)}
                       >
-                        <td className="py-3 pr-3">
-                          <span
-                            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
-                              activity.type === "rutin"
-                                ? "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300"
-                                : "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300"
-                            }`}
-                          >
+                        <td className="py-3 pr-3 pl-3">
+                          <span className="text-sm font-medium text-slate-900 dark:text-white">
                             {activity.name}
                           </span>
                         </td>
@@ -1750,13 +1873,24 @@ export default function AbsensiPage() {
                             className="py-3 pr-3 text-right"
                             onClick={(e) => e.stopPropagation()}
                           >
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteActivity(activity.id)}
-                              className="rounded-md px-2 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition"
-                            >
-                              Hapus
-                            </button>
+                            {editMode && (
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRenameActivity(activity.id, activity.name)}
+                                  className="rounded-md px-2 py-1 text-xs font-medium text-sky-600 dark:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/20 transition"
+                                >
+                                  Rename
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteActivity(activity.id)}
+                                  className="rounded-md px-2 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition"
+                                >
+                                  Hapus
+                                </button>
+                              </div>
+                            )}
                           </td>
                         )}
                       </tr>
@@ -1768,29 +1902,76 @@ export default function AbsensiPage() {
           )}
         </Card>
 
-        {/* FAB group - tambah kegiatan (admin) + scan QR */}
+        {/* FAB group - edit/tambah kegiatan (admin) + scan QR */}
         <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 flex flex-col items-center gap-1.5 md:bottom-6">
           {userCanEdit && (
-            <button
-              type="button"
-              aria-label="Tambah kegiatan"
-              className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600"
-              onClick={() => setOpenAddActivity(true)}
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-                aria-hidden="true"
+            <div className="relative" onMouseDown={(e) => e.stopPropagation()}>
+              {/* Dropdown menu — hanya tampil saat tidak di edit mode */}
+              {editFabOpen && !editMode && (
+                <div className="absolute bottom-14 right-0 mb-1 flex flex-col gap-1 items-end">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditFabOpen(false);
+                      setOpenAddActivity(true);
+                    }}
+                    className="flex items-center gap-2 rounded-xl bg-slate-900 dark:bg-slate-700 text-white text-xs font-medium px-4 py-2.5 shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 whitespace-nowrap"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+                      <path d="M12 5v14" /><path d="M5 12h14" />
+                    </svg>
+                    Tambah Kegiatan
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditFabOpen(false);
+                      setEditMode(true);
+                    }}
+                    className="flex items-center gap-2 rounded-xl bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium px-4 py-2.5 shadow-lg hover:bg-slate-50 dark:hover:bg-slate-700 whitespace-nowrap transition"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                    </svg>
+                    Edit Kegiatan
+                  </button>
+                </div>
+              )}
+              {/* FAB: centang hijau saat edit mode, pensil saat normal */}
+              <button
+                type="button"
+                aria-label={editMode ? "Selesai edit" : "Opsi kegiatan"}
+                className={`grid h-12 w-12 place-items-center rounded-full shadow-lg transition ${
+                  editMode
+                    ? "bg-emerald-500 hover:bg-emerald-600 text-white"
+                    : editFabOpen
+                    ? "bg-slate-700 dark:bg-slate-600 text-white"
+                    : "bg-slate-900 dark:bg-slate-700 text-white hover:bg-slate-800 dark:hover:bg-slate-600"
+                }`}
+                onClick={() => {
+                  if (editMode) {
+                    setEditMode(false);
+                    setEditFabOpen(false);
+                  } else {
+                    setEditFabOpen((v) => !v);
+                  }
+                }}
               >
-                <path d="M12 5v14" />
-                <path d="M5 12h14" />
-              </svg>
-            </button>
+                {editMode ? (
+                  /* Icon centang */
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                ) : (
+                  /* Icon pensil */
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                )}
+              </button>
+            </div>
           )}
           {!openQRScanner && !openQRDisplay && (
             <button
@@ -1820,6 +2001,53 @@ export default function AbsensiPage() {
             </button>
           )}
         </div>
+
+        {/* Modal rename kegiatan */}
+        <Modal
+          open={openRenameActivity}
+          title="Rename Kegiatan"
+          onClose={() => {
+            setOpenRenameActivity(false);
+            setRenameActivityId(null);
+            setRenameActivityValue("");
+          }}
+        >
+          <div className="grid gap-3">
+            <div>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                Nama Baru
+              </div>
+              <Input
+                placeholder="Nama kegiatan"
+                value={renameActivityValue}
+                onChange={(e) => setRenameActivityValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleConfirmRenameActivity()}
+                autoFocus
+              />
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Data kehadiran yang sudah tercatat tidak akan terhapus.
+            </p>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setOpenRenameActivity(false);
+                  setRenameActivityId(null);
+                  setRenameActivityValue("");
+                }}
+              >
+                Batal
+              </Button>
+              <Button
+                onClick={handleConfirmRenameActivity}
+                disabled={!renameActivityValue.trim()}
+              >
+                Simpan
+              </Button>
+            </div>
+          </div>
+        </Modal>
 
         {/* Modal tambah kegiatan */}
         <Modal

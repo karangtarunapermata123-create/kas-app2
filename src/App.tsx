@@ -6,7 +6,7 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import AbsensiPage from "./pages/AbsensiPage";
 import BukuKasPage from "./pages/BukuKasPage";
 import PengaturanPage from "./pages/PengaturanPage";
@@ -141,8 +141,18 @@ function AppShell() {
   const [headerBackTo, setHeaderBackTo] = useState<string | undefined>(
     undefined,
   );
+  const [prevPath, setPrevPath] = useState<string>("/buku-kas");
 
   const path = location.pathname;
+
+  // Simpan path sebelumnya setiap kali pindah halaman (kecuali pengaturan)
+  const prevPathRef = useRef<string>("/buku-kas");
+  useEffect(() => {
+    if (path !== "/pengaturan") {
+      prevPathRef.current = path;
+      setPrevPath(path);
+    }
+  }, [path]);
   const parts = path.split("/").filter(Boolean);
   const isBookGroupRoute =
     parts[0] === "buku-kas" && parts[1] === "group" && Boolean(parts[2]);
@@ -322,8 +332,8 @@ function AppShell() {
         <div className="flex min-w-0 flex-1 flex-col">
           {/* Header mobile */}
           <header className="sticky top-0 z-30 border-b bg-white dark:bg-slate-900 dark:border-slate-800 md:hidden">
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0 text-lg font-bold text-slate-900 dark:text-white truncate">
+            <div className="flex items-center justify-between gap-3 px-4 py-1.5">
+              <div className="min-w-0 text-base font-bold text-slate-900 dark:text-white truncate">
                 {header.title}
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -336,19 +346,22 @@ function AppShell() {
                     Kembali
                   </button>
                 ) : null}
-                <NavLink
-                  to="/pengaturan"
-                  title="Pengaturan"
-                  className={({ isActive }) =>
-                    `inline-flex h-9 w-9 items-center justify-center rounded-lg border dark:border-slate-700 transition ${
-                      isActive
-                        ? "bg-slate-900 dark:bg-slate-700 text-white border-slate-900 dark:border-slate-700"
-                        : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                    }`
+                <button
+                  type="button"
+                  title={path === "/pengaturan" ? "Kembali" : "Pengaturan"}
+                  className={`inline-flex h-9 w-9 items-center justify-center rounded-lg border dark:border-slate-700 transition ${
+                    path === "/pengaturan"
+                      ? "bg-slate-900 dark:bg-slate-700 text-white border-slate-900 dark:border-slate-700"
+                      : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  }`}
+                  onClick={() =>
+                    path === "/pengaturan"
+                      ? navigate(prevPath)
+                      : navigate("/pengaturan")
                   }
                 >
                   <IconSettings className="h-4 w-4" />
-                </NavLink>
+                </button>
               </div>
             </div>
           </header>

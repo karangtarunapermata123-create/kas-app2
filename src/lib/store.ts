@@ -1676,6 +1676,20 @@ export async function deleteActivitySession(sessionId: string): Promise<void> {
   }
 }
 
+export async function updateActivitySession(
+  sessionId: string,
+  patch: { date?: string; label?: string },
+): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (patch.date !== undefined) update.date = patch.date;
+  if (patch.label !== undefined) update.label = patch.label.trim();
+  const { error } = await supabase
+    .from("activity_sessions")
+    .update(update)
+    .eq("id", sessionId);
+  if (error) throw error;
+}
+
 // ─── Attendance Records ───────────────────────────────────────────────────────
 
 export async function getAttendanceRecords(): Promise<AttendanceRecord[]> {
