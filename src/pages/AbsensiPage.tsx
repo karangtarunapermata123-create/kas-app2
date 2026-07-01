@@ -135,8 +135,12 @@ function AttendanceTable({
                               ? "hover:scale-110 cursor-pointer"
                               : "cursor-not-allowed opacity-60"
                           } ${
-                            status === "tidak-hadir"
+                            status === "hadir"
+                              ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                              : status === "tidak-hadir"
                               ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                              : status === "izin"
+                              ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
                               : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
                           }`}
                           aria-label="Ubah status kehadiran"
@@ -1052,7 +1056,7 @@ export default function AbsensiPage() {
             <button
               type="button"
               aria-label="Scan QR Code"
-              className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+              className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
               onClick={() => {
                 setQrScannerKey((k) => k + 1);
                 setOpenQRScanner(true);
@@ -1323,8 +1327,12 @@ export default function AbsensiPage() {
                                               ? "hover:scale-110 cursor-pointer"
                                               : "cursor-not-allowed opacity-60"
                                           } ${
-                                            status === "tidak-hadir"
+                                            status === "hadir"
+                                              ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                              : status === "tidak-hadir"
                                               ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                              : status === "izin"
+                                              ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
                                               : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
                                           }`}
                                           aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
@@ -1445,34 +1453,6 @@ export default function AbsensiPage() {
                 </>
               )}
 
-{/* FAB: Tambah Sesi - hanya untuk admin di kegiatan rutin (di atas tombol Scan QR) */}
-                {userCanEdit && isRutin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSessionLabel(suggestSessionLabel(selectedActivity));
-                      setSessionDate(new Date().toISOString().split("T")[0]);
-                      setOpenAddSession(true);
-                    }}
-className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-[calc(1.5rem+56px+5px)]"
-                    aria-label="Tambah Sesi"
-                  >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-5 w-5"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 5v14" />
-                    <path d="M5 12h14" />
-                  </svg>
-                </button>
-              )}
-
               {/* Status Modal untuk edit kehadiran */}
               <StatusModal
                 open={openStatus}
@@ -1541,7 +1521,7 @@ className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-
             <button
               type="button"
               aria-label="Scan QR Code"
-              className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
+              className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
               onClick={() => {
                 setQrScannerKey((k) => k + 1);
                 setOpenQRScanner(true);
@@ -1696,25 +1676,27 @@ className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-
   return (
     <>
       <div className="grid gap-4">
-        {/* Filter */}
-        <div className="flex items-center gap-2">
-          {(["semua", "sekali", "rutin"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setFilterType(t)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium capitalize transition ${
-                filterType === t
-                  ? "bg-slate-900 dark:bg-slate-700 text-white"
-                  : "bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-              }`}
-            >
-              {t.charAt(0).toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        <Card title="Daftar Kegiatan">
+        <Card
+          title="Daftar Kegiatan"
+          right={
+            <div className="flex items-center gap-1.5">
+              {(["semua", "sekali", "rutin"] as const).map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setFilterType(t)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-medium capitalize transition ${
+                    filterType === t
+                      ? "bg-slate-900 dark:bg-slate-700 text-white"
+                      : "bg-white dark:bg-slate-800 border dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                  }`}
+                >
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+          }
+        >
           {filtered.length === 0 ? (
             <div className="py-4 text-sm text-slate-500 dark:text-slate-400">
               Belum ada kegiatan. Klik tombol + untuk membuat kegiatan baru.
@@ -1722,51 +1704,61 @@ className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-left text-sm">
-                <thead className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                  <tr>
-                    <th className="py-2 pr-3">Nama Kegiatan</th>
-                    <th className="py-2 pr-3">Tipe</th>
-                    <th className="py-2 pr-3">Tanggal</th>
-                    <th className="py-2 pr-3 text-right">Aksi</th>
+                <thead>
+                  <tr className="border-b-2 border-slate-200 dark:border-slate-700">
+                    <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Nama Kegiatan</th>
+                    <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tipe</th>
+                    <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tanggal</th>
+                    {userCanEdit && (
+                      <th className="py-3 pr-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Aksi</th>
+                    )}
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((activity) => {
+                  {filtered.map((activity, i) => {
                     return (
                       <tr
                         key={activity.id}
-                        className="border-t dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                        className={`cursor-pointer border-b border-slate-100 dark:border-slate-700/50 transition ${
+                          i % 2 === 0
+                            ? "bg-white dark:bg-slate-800"
+                            : "bg-slate-50/50 dark:bg-slate-800/50"
+                        } hover:bg-sky-50 dark:hover:bg-sky-900/20`}
                         onClick={() => navigate(`/absensi/${activity.id}`)}
                       >
-                        <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">
-                          {activity.name}
-                        </td>
-                        <td className="py-2 pr-3">
+                        <td className="py-3 pr-3">
                           <span
-                            className={`text-xs font-medium border-b-2 pb-0.5 ${activity.type === "rutin" ? "border-violet-500 text-violet-700 dark:text-violet-400" : "border-sky-500 text-sky-700 dark:text-sky-400"}`}
+                            className={`inline-block rounded-full px-3 py-1 text-xs font-semibold ${
+                              activity.type === "rutin"
+                                ? "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300"
+                                : "bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300"
+                            }`}
                           >
-                            {activity.type === "rutin"
-                              ? `Rutin · ${activity.frequency === "bulanan" ? "Bulanan" : "Mingguan"}`
-                              : "Sekali"}
+                            {activity.name}
                           </span>
                         </td>
-                        <td className="py-2 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">
-                          {activity.date}
+                        <td className="py-3 pr-3 font-medium text-slate-600 dark:text-slate-400">
+                          {activity.type === "rutin"
+                            ? `Rutin · ${activity.frequency === "bulanan" ? "Bulanan" : "Mingguan"}`
+                            : "Sekali"}
                         </td>
-                        <td
-                          className="py-2 pr-3 text-right"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {userCanEdit && (
+                        <td className="py-3 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">
+                          <span className="tabular-nums">{activity.date}</span>
+                        </td>
+                        {userCanEdit && (
+                          <td
+                            className="py-3 pr-3 text-right"
+                            onClick={(e) => e.stopPropagation()}
+                          >
                             <button
                               type="button"
                               onClick={() => handleDeleteActivity(activity.id)}
-                              className="text-xs text-rose-600 dark:text-rose-400 hover:underline"
+                              className="rounded-md px-2 py-1 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition"
                             >
                               Hapus
                             </button>
-                          )}
-                        </td>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -1776,58 +1768,58 @@ className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-
           )}
         </Card>
 
-        {/* FAB - Tambah Kegiatan (hanya admin, di atas tombol Scan QR) */}
-        {userCanEdit && (
-          <button
-            type="button"
-            aria-label="Tambah kegiatan"
-className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom)+56px+5px)] right-6 z-50 grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 md:bottom-20"
-            onClick={() => setOpenAddActivity(true)}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-5 w-5"
-              aria-hidden="true"
+        {/* FAB group - tambah kegiatan (admin) + scan QR */}
+        <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 flex flex-col items-center gap-1.5 md:bottom-6">
+          {userCanEdit && (
+            <button
+              type="button"
+              aria-label="Tambah kegiatan"
+              className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600"
+              onClick={() => setOpenAddActivity(true)}
             >
-              <path d="M12 5v14" />
-              <path d="M5 12h14" />
-            </svg>
-          </button>
-        )}
-
-        {/* FAB - Scan QR (untuk semua user) */}
-        {!openQRScanner && !openQRDisplay && (
-          <button
-            type="button"
-            aria-label="Scan QR Code"
-            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-50 grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600 md:bottom-6"
-            onClick={() => {
-              setQrScannerKey((k) => k + 1);
-              setOpenQRScanner(true);
-            }}
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="h-7 w-7"
-              aria-hidden="true"
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M12 5v14" />
+                <path d="M5 12h14" />
+              </svg>
+            </button>
+          )}
+          {!openQRScanner && !openQRDisplay && (
+            <button
+              type="button"
+              aria-label="Scan QR Code"
+              className="grid h-14 w-14 place-items-center rounded-full bg-emerald-600 dark:bg-emerald-700 text-white shadow-lg hover:bg-emerald-700 dark:hover:bg-emerald-600"
+              onClick={() => {
+                setQrScannerKey((k) => k + 1);
+                setOpenQRScanner(true);
+              }}
             >
-              <rect x="3" y="3" width="7" height="7" />
-              <rect x="14" y="3" width="7" height="7" />
-              <rect x="14" y="14" width="7" height="7" />
-              <rect x="3" y="14" width="7" height="7" />
-            </svg>
-          </button>
-        )}
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-7 w-7"
+                aria-hidden="true"
+              >
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* Modal tambah kegiatan */}
         <Modal

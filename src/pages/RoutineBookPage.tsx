@@ -74,6 +74,17 @@ export default function RoutineBookPage() {
     canEditBook(profile, bookId).then(setUserCanEdit);
   }, [profile, bookId]);
 
+  // Disable scroll di <main> saat halaman ini aktif agar toolbar tidak ikut scroll
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (!main) return;
+    const prev = main.style.overflowY;
+    main.style.overflowY = "hidden";
+    return () => {
+      main.style.overflowY = prev;
+    };
+  }, []);
+
   const safeBookId = bookId;
 
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(
@@ -93,6 +104,10 @@ export default function RoutineBookPage() {
   const [saldoStartX, setSaldoStartX] = useState(0);
   const [saldoScrollLeft, setSaldoScrollLeft] = useState(0);
   const [saldoHasDragged, setSaldoHasDragged] = useState(false);
+
+  // Ref ke wrapper tabel — dipakai untuk mengukur posisinya dan set height agar mepet bottom nav
+  const tableWrapperRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<string>("400px");
 
   const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!scrollContainerRef.current) return;
@@ -360,6 +375,25 @@ export default function RoutineBookPage() {
       }
     };
   }, [safeBookId]);
+
+  // Update tinggi tabel secara dinamis agar mepet bottom nav
+  useEffect(() => {
+    function updateTableHeight() {
+      if (!tableWrapperRef.current) return;
+      const rect = tableWrapperRef.current.getBoundingClientRect();
+      const bottomNav = window.innerWidth < 768 ? 56 : 0;
+      const available = window.innerHeight - rect.top - bottomNav - 4;
+      setTableHeight(`${Math.max(150, available)}px`);
+    }
+
+    const raf = requestAnimationFrame(updateTableHeight);
+    window.addEventListener("resize", updateTableHeight);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", updateTableHeight);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members.length, categories.length, sessions.length, frequency, selectedSessionId, selectedCategoryId]);
 
   const getPeriodKey = (monthIndex: number) =>
     `${selectedYear}-${String(monthIndex + 1).padStart(2, "0")}`;
@@ -687,11 +721,13 @@ export default function RoutineBookPage() {
   // Untuk arisan, gunakan members dan categories dari session yang dipilih
   // Untuk bulanan, gunakan members dan categories global
   const displayMembers = useMemo(() => {
+    const sort = (list: typeof members) =>
+      [...list].sort((a, b) => a.name.localeCompare(b.name, "id"));
     if (frequency === "arisan" && selectedSessionId) {
       const session = sessions.find((s) => s.id === selectedSessionId);
-      return session?.members || [];
+      return sort(session?.members || []);
     }
-    return members;
+    return sort(members);
   }, [frequency, selectedSessionId, sessions, members]);
 
   const displayCategories = useMemo(() => {
@@ -1276,10 +1312,10 @@ export default function RoutineBookPage() {
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="flex flex-col gap-2 md:gap-4">
       {frequency === "bulanan" ? (
         <div className="flex items-center gap-2">
-          <div className="max-w-[140px]">
+          <div className="max-w-[120px]">
             <Select
               value={String(selectedYear)}
               onChange={(e) => setSelectedYear(Number(e.target.value))}
@@ -1291,23 +1327,27 @@ export default function RoutineBookPage() {
               ))}
             </Select>
           </div>
-          <Button variant="secondary" onClick={() => setOpenDetailModal(true)}>
+          <button
+            type="button"
+            onClick={() => setOpenDetailModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+          >
             Lihat Detail
-          </Button>
+          </button>
         </div>
       ) : (
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setPickOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+            className="inline-flex items-center gap-1.5 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
           >
             {sessions.find((s) => s.id === selectedSessionId)?.name ??
               "Pilih sesi"}
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width="12"
+              height="12"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -1318,9 +1358,13 @@ export default function RoutineBookPage() {
               <polyline points="6 9 12 15 18 9" />
             </svg>
           </button>
-          <Button variant="secondary" onClick={() => setOpenDetailModal(true)}>
+          <button
+            type="button"
+            onClick={() => setOpenDetailModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+          >
             Lihat Detail
-          </Button>
+          </button>
         </div>
       )}
 
@@ -1347,19 +1391,19 @@ export default function RoutineBookPage() {
           </div>
         </Card>
       ) : (
-        <>
+        <div className="flex flex-col gap-2 flex-1 min-h-0">
           <div
             ref={saldoScrollContainerRef}
             onMouseDown={handleSaldoMouseDown}
             onMouseLeave={handleMouseLeave}
             onMouseUp={handleMouseUp}
             onMouseMove={handleSaldoMouseMove}
-            className={`flex gap-3 overflow-x-auto pb-2 select-none ${
+            className={`flex gap-2 overflow-x-auto select-none ${
               isSaldoDragging ? "cursor-grabbing" : "cursor-grab"
             }`}
             style={{
-              scrollbarWidth: "none", // Firefox
-              msOverflowStyle: "none", // IE/Edge
+              scrollbarWidth: "none",
+              msOverflowStyle: "none",
             }}
           >
             <style>
@@ -1390,29 +1434,29 @@ export default function RoutineBookPage() {
                 <div
                   key={category.id}
                   onClick={() => handleSaldoCardClick(() => handleOpenCashSaldoModal(category))}
-                  className={`min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm transition text-left ${hoverClass} dark:border-slate-700 dark:bg-slate-800 cursor-pointer`}
+                  className={`min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm transition text-left ${hoverClass} dark:border-slate-700 dark:bg-slate-800 cursor-pointer`}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center justify-between gap-2">
                     <div>
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
+                      <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
                         Saldo {category.name}
                       </div>
-                      <div className={`mt-1 text-base font-semibold ${colorClass}`}>
+                      <div className={`text-sm font-semibold ${colorClass}`}>
                         {formatIDR(categorySaldo)}
                       </div>
                     </div>
-                    <span className={`text-[10px] font-medium uppercase tracking-wide ${colorClass}`}>
+                    <span className={`text-[9px] font-medium uppercase tracking-wide ${colorClass} shrink-0`}>
                       Klik
                     </span>
                   </div>
                 </div>
               );
             })}
-            <div className="min-w-[220px] rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-              <div className="text-xs text-slate-500 dark:text-slate-400">
+            <div className="min-w-[140px] rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm dark:border-slate-700 dark:bg-slate-800">
+              <div className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
                 Total Saldo
               </div>
-              <div className="mt-1 text-base font-semibold text-slate-900 dark:text-white">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">
                 {formatIDR(saldoSummary.totalSaldo)}
               </div>
             </div>
@@ -1424,12 +1468,12 @@ export default function RoutineBookPage() {
             onMouseLeave={handleMouseLeave}
             onMouseUp={handleMouseUp}
             onMouseMove={handleMouseMove}
-            className={`flex gap-2 text-sm overflow-x-auto scrollbar-hide px-4 py-2 ${isDragging ? "cursor-grabbing" : "cursor-grab"} select-none`}
+            className={`flex gap-1.5 text-xs overflow-x-auto scrollbar-hide py-0.5 ${isDragging ? "cursor-grabbing" : "cursor-grab"} select-none`}
           >
             <button
               type="button"
               onClick={() => handleCategoryClick(null)}
-              className={`rounded-lg px-3 py-1.5 font-medium transition whitespace-nowrap shrink-0 ${
+              className={`rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap shrink-0 ${
                 selectedCategoryId === null
                   ? "bg-slate-900 dark:bg-slate-700 text-white"
                   : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
@@ -1442,7 +1486,7 @@ export default function RoutineBookPage() {
                 key={c.id}
                 type="button"
                 onClick={() => handleCategoryClick(c.id)}
-                className={`rounded-lg px-3 py-1.5 font-medium transition whitespace-nowrap shrink-0 ${
+                className={`rounded-md px-2.5 py-1 font-medium transition whitespace-nowrap shrink-0 ${
                   selectedCategoryId === c.id
                     ? "bg-slate-900 dark:bg-slate-700 text-white"
                     : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
@@ -1453,7 +1497,11 @@ export default function RoutineBookPage() {
             ))}
           </div>
 
-          <div className="max-h-[70vh] overflow-auto rounded-xl border border-slate-200 dark:border-slate-700">
+          <div
+            ref={tableWrapperRef}
+            className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700"
+            style={{ height: tableHeight }}
+          >
             <table
               className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm"
               style={{ tableLayout: "fixed" }}
@@ -1802,7 +1850,7 @@ export default function RoutineBookPage() {
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       )}
 
       <Modal

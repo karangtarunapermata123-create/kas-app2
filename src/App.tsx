@@ -257,7 +257,7 @@ function AppShell() {
 
   return (
     <div className="min-h-full">
-      <div className="flex min-h-[calc(100vh-1px)] w-full">
+      <div className="flex h-screen w-full overflow-hidden">
         {/* Sidebar desktop */}
         <aside
           className={`hidden shrink-0 overflow-hidden border-r bg-slate-50 dark:bg-slate-900 dark:border-slate-800 transition-[width] duration-300 ease-in-out md:flex md:flex-col ${
@@ -371,7 +371,7 @@ function AppShell() {
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 overflow-x-hidden scrollbar-hide px-4 py-6 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-6 md:pt-4">
+          <main className="min-w-0 flex-1 flex flex-col overflow-x-hidden overflow-y-auto scrollbar-hide px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-6 md:pt-4">
             <Routes>
               <Route path="/" element={<Navigate to="/buku-kas" replace />} />
               <Route path="/buku-kas" element={<BukuKasPage />} />
@@ -414,73 +414,55 @@ function AppShell() {
 
           {/* Bottom nav mobile */}
           <nav className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white dark:bg-slate-900 dark:border-slate-800 md:hidden">
-            <div className="grid grid-cols-3 px-2 pt-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))]">
+            <div className="grid grid-cols-3">
               <NavLink
                 to="/buku-kas"
-                className="flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium text-slate-500 dark:text-slate-400"
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center pt-2 pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[10px] font-medium transition ${
+                    isActive
+                      ? "text-slate-900 dark:text-white"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`
+                }
               >
                 {({ isActive }) => (
                   <>
-                    <span
-                      className={
-                        isActive
-                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
-                          : "grid h-9 w-9 place-items-center rounded-full"
-                      }
-                    >
-                      <IconBook
-                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
-                      />
-                    </span>
-                    <span className="text-slate-500 dark:text-slate-400">
-                      Kas
-                    </span>
+                    <IconBook className={`h-4 w-4 mb-0.5 ${isActive ? "stroke-[2.5]" : ""}`} />
+                    <span className={`relative ${isActive ? "font-semibold after:absolute after:-bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-0.5 after:w-5 after:rounded-full after:bg-slate-900 dark:after:bg-white" : ""}`}>Kas</span>
                   </>
                 )}
               </NavLink>
               <NavLink
                 to="/absensi"
-                className="flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium text-slate-500 dark:text-slate-400"
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center pt-2 pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[10px] font-medium transition ${
+                    isActive
+                      ? "text-slate-900 dark:text-white"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`
+                }
               >
                 {({ isActive }) => (
                   <>
-                    <span
-                      className={
-                        isActive
-                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
-                          : "grid h-9 w-9 place-items-center rounded-full"
-                      }
-                    >
-                      <IconUsers
-                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
-                      />
-                    </span>
-                    <span className="text-slate-500 dark:text-slate-400">
-                      Absensi
-                    </span>
+                    <IconUsers className={`h-4 w-4 mb-0.5 ${isActive ? "stroke-[2.5]" : ""}`} />
+                    <span className={`relative ${isActive ? "font-semibold after:absolute after:-bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-0.5 after:w-5 after:rounded-full after:bg-slate-900 dark:after:bg-white" : ""}`}>Absensi</span>
                   </>
                 )}
               </NavLink>
               <NavLink
                 to="/profil"
-                className="flex flex-col items-center justify-center gap-1 rounded-lg px-2 py-2 text-xs font-medium text-slate-500 dark:text-slate-400"
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center pt-2 pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[10px] font-medium transition ${
+                    isActive
+                      ? "text-slate-900 dark:text-white"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`
+                }
               >
                 {({ isActive }) => (
                   <>
-                    <span
-                      className={
-                        isActive
-                          ? "grid h-9 w-9 place-items-center rounded-full bg-black/10 dark:bg-white/10"
-                          : "grid h-9 w-9 place-items-center rounded-full"
-                      }
-                    >
-                      <IconUser
-                        className={`h-5 w-5 ${isActive ? "text-black dark:text-white" : "text-slate-400 dark:text-slate-500"}`}
-                      />
-                    </span>
-                    <span className="text-slate-500 dark:text-slate-400">
-                      Profil
-                    </span>
+                    <IconUser className={`h-4 w-4 mb-0.5 ${isActive ? "stroke-[2.5]" : ""}`} />
+                    <span className={`relative ${isActive ? "font-semibold after:absolute after:-bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-0.5 after:w-5 after:rounded-full after:bg-slate-900 dark:after:bg-white" : ""}`}>Profil</span>
                   </>
                 )}
               </NavLink>

@@ -916,7 +916,7 @@ export default function BukuKasPage() {
         <button
           type="button"
           aria-label="Kelola buku kas"
-          className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
+          className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
           onClick={() => {
             refreshBooks();
             setOpenManageBooks(true);
