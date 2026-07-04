@@ -7,7 +7,7 @@ import { updateUserName, ROLE_LABELS, ROLE_COLORS, ROLE_TEXT_COLORS } from '../l
 import { supabase } from '../lib/supabase'
 
 export default function ProfilPage() {
-  const { profile, user, signOut } = useAuth()
+  const { profile, user, signOut, refreshProfile } = useAuth()
 
   // ── Modal edit profil ──────────────────────────────────────────────────────
   const [openEdit, setOpenEdit] = useState(false)
@@ -75,6 +75,7 @@ export default function ProfilPage() {
       // Simpan nama
       if (profile) {
         await updateUserName(profile.id, name)
+        await refreshProfile()
       }
 
       // Ganti password kalau diisi
@@ -108,7 +109,7 @@ export default function ProfilPage() {
   }
 
   return (
-    <div className="grid gap-4 max-w-lg">
+    <div className="grid gap-4">
 
       {/* ── Informasi Akun ── */}
       <button

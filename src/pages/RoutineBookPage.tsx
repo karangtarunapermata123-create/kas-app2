@@ -601,14 +601,22 @@ export default function RoutineBookPage() {
     if (!editingSessionId) return;
 
     const session = sessions.find((s) => s.id === editingSessionId);
-    const memberIdByName = new Map(
+    const memberIdByProfileId = new Map<string, string>(
+      (session?.members || [])
+        .filter((m) => m.profileId)
+        .map((m) => [m.profileId as string, m.id]),
+    );
+    const memberIdByName = new Map<string, string>(
       (session?.members || []).map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
 
     const selectedProfiles = allProfiles.filter((p) => selectedProfileIds.has(p.id));
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
-      id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
+      id: memberIdByProfileId.get(p.id)
+        ?? memberIdByName.get(p.full_name.trim().toLowerCase())
+        ?? uid("rm"),
       name: p.full_name,
+      profileId: p.id,
       categoryIds: Array.from(selectedSessionMemberCategoryIds[p.id] || []),
     }));
 
@@ -2224,7 +2232,7 @@ export default function RoutineBookPage() {
                         </label>
                       );
                     })()}
-                    {allProfiles.map((profile) => {
+                    {[...allProfiles].sort((a, b) => a.full_name.localeCompare(b.full_name, "id")).map((profile) => {
                       const memberCatIds = selectedSessionMemberCategoryIds[profile.id] || new Set();
                       const isChecked = memberCatIds.has(sessionMemberSettingsTab);
                       return (

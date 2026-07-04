@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
-import Modal from './Modal'
 import Button from './Button'
 
 type QRScannerProps = {
@@ -9,144 +8,80 @@ type QRScannerProps = {
   onScan: (data: string) => void
 }
 
-export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
-  const [scanning, setScanning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [containerId, setContainerId] = useState('')
+const CONTAINER_ID = 'qr-reader-inline'
 
+export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
+  const [error, setError] = useState<string | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
   const isScanningRef = useRef(false)
   const mountedRef = useRef(false)
 
-  // Step 1: ketika modal dibuka → generate containerId
   useEffect(() => {
-    if (open) {
-      mountedRef.current = true
-      const newId = `qr-reader-${Date.now()}`
-      setContainerId(newId)
-      setScanning(false)
-      setError(null)
-    } else {
-      mountedRef.current = false
-      stopScanner()
-    }
+    if (!open) return
+
+    mountedRef.current = true
+    setError(null)
+
+    // Langsung start — tidak perlu tunggu animasi modal
+    const timer = setTimeout(() => {
+      if (mountedRef.current) startScanner()
+    }, 80) // minimal delay untuk pastikan DOM render
 
     return () => {
+      clearTimeout(timer)
       mountedRef.current = false
       stopScanner()
     }
   }, [open])
 
-  // Step 2: ketika containerId sudah di-render di DOM → mulai kamera
-  useEffect(() => {
-    if (!open || !containerId) return
-
-    const timer = setTimeout(async () => {
-      if (!mountedRef.current) return
-
-      // Pastikan element benar-benar ada di DOM
-      const el = document.getElementById(containerId)
-      if (!el) {
-        console.warn('[QRScanner] Container element not found in DOM, retrying...', containerId)
-        return
-      }
-
-      await startScanner(containerId)
-    }, 500) // kasih waktu cukup untuk render + transisi modal
-
-    return () => clearTimeout(timer)
-  }, [open, containerId])
-
-  // Minta permission kamera sebelum start scanner
-  async function requestCamera(): Promise<boolean> {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' }
-      })
-      // Stop semua track agar tidak conflict dengan Html5Qrcode
-      stream.getTracks().forEach(track => track.stop())
-      return true
-    } catch (err: any) {
-      console.error('[QRScanner] Camera permission denied:', err)
-      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
-        setError('Izin kamera ditolak. Silakan berikan izin kamera di pengaturan browser.')
-      } else if (err?.name === 'NotFoundError') {
-        setError('Kamera tidak ditemukan di perangkat ini.')
-      } else {
-        setError('Tidak dapat mengakses kamera. Pastikan izin kamera sudah diberikan.')
-      }
-      return false
-    }
-  }
-
-  async function startScanner(elementId: string) {
+  async function startScanner() {
     if (isScanningRef.current) return
-    if (!mountedRef.current) return
+
+    const el = document.getElementById(CONTAINER_ID)
+    if (!el) return
 
     try {
       setError(null)
-      setScanning(false)
-
-      // 1. Minta izin kamera dulu
-      setError('Mengakses kamera...')
-      const hasPermission = await requestCamera()
-      if (!hasPermission || !mountedRef.current) return
-
-      // 2. Pastikan element masih ada
-      const el = document.getElementById(elementId)
-      if (!el) {
-        setError('Container kamera tidak tersedia.')
-        return
-      }
-
-      // 3. Buat scanner
-      const scanner = new Html5Qrcode(elementId)
+      const scanner = new Html5Qrcode(CONTAINER_ID)
       scannerRef.current = scanner
       isScanningRef.current = true
 
-      // 4. Coba dengan kamera belakang (environment), fallback ke depan (user)
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
+        { fps: 10, qrbox: { width: 240, height: 240 } },
         (decodedText) => {
           onScan(decodedText)
           stopScanner()
           onClose()
         },
-        () => {
-          // ignore individual frame errors
-        }
+        () => {} // abaikan frame errors
       )
-
-      setScanning(true)
-      setError(null)
     } catch (err: any) {
-      console.error('[QRScanner] Error starting scanner:', err)
-
-      // Coba fallback ke kamera depan jika environment gagal
-      if (scannerRef.current && !isScanningRef.current) {
-        try {
-          await scannerRef.current.start(
-            { facingMode: 'user' },
-            { fps: 10, qrbox: { width: 250, height: 250 } },
-            (decodedText) => {
-              onScan(decodedText)
-              stopScanner()
-              onClose()
-            },
-            () => {}
-          )
-          setScanning(true)
-          setError(null)
-          return
-        } catch (fallbackErr) {
-          console.error('[QRScanner] Fallback camera also failed:', fallbackErr)
-        }
-      }
-
-      setError('Tidak dapat mengakses kamera. Pastikan izin kamera sudah diberikan.')
       isScanningRef.current = false
-      setScanning(false)
+      // Fallback ke kamera depan
+      try {
+        const scanner = scannerRef.current ?? new Html5Qrcode(CONTAINER_ID)
+        scannerRef.current = scanner
+        await scanner.start(
+          { facingMode: 'user' },
+          { fps: 10, qrbox: { width: 240, height: 240 } },
+          (decodedText) => {
+            onScan(decodedText)
+            stopScanner()
+            onClose()
+          },
+          () => {}
+        )
+        isScanningRef.current = true
+      } catch {
+        const msg = err?.name === 'NotAllowedError'
+          ? 'Izin kamera ditolak. Berikan izin kamera di pengaturan browser.'
+          : err?.name === 'NotFoundError'
+          ? 'Kamera tidak ditemukan di perangkat ini.'
+          : 'Tidak dapat mengakses kamera.'
+        setError(msg)
+        scannerRef.current = null
+      }
     }
   }
 
@@ -155,12 +90,11 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
       try {
         await scannerRef.current.stop()
         await scannerRef.current.clear()
-      } catch (err) {
-        console.warn('[QRScanner] Error stopping scanner:', err)
+      } catch {
+        // ignore
       }
       scannerRef.current = null
       isScanningRef.current = false
-      setScanning(false)
     }
   }
 
@@ -169,35 +103,47 @@ export default function QRScanner({ open, onClose, onScan }: QRScannerProps) {
     onClose()
   }
 
-  // Pastikan reference isScanningRef sinkron dengan state
-  // (untuk prevent race condition)
+  if (!open) return null
 
   return (
-    <Modal open={open} title="Scan QR Code Absensi" onClose={handleClose}>
-      <div className="grid gap-4">
-        {error && (
-          <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-4 py-3 text-sm text-rose-700 dark:text-rose-400">
+    <div className="fixed inset-0 z-50 flex flex-col bg-black">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-black/80">
+        <span className="text-white text-sm font-medium">Scan QR Code Absensi</span>
+        <button
+          type="button"
+          onClick={handleClose}
+          className="text-white/70 hover:text-white p-1"
+          aria-label="Tutup scanner"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-6 w-6">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Kamera */}
+      <div className="flex-1 relative overflow-hidden">
+        {/* Kamera — Html5Qrcode render kotak scan-nya sendiri */}
+        <div id={CONTAINER_ID} className="w-full h-full" />
+      </div>
+
+      {/* Footer */}
+      <div className="px-4 py-4 bg-black/80 flex flex-col items-center gap-3">
+        {error ? (
+          <div className="w-full rounded-lg bg-rose-900/60 border border-rose-700 px-4 py-3 text-sm text-rose-300 text-center">
             {error}
           </div>
+        ) : (
+          <p className="text-xs text-white/50 text-center">
+            Arahkan kamera ke QR code yang ditampilkan admin
+          </p>
         )}
-
-        <div className="relative overflow-hidden rounded-lg bg-slate-100 dark:bg-slate-800">
-          <div id={containerId} className="w-full min-h-[200px]"></div>
-          {!scanning && !error && (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-sm text-slate-500 dark:text-slate-400">Memulai kamera...</div>
-            </div>
-          )}
-        </div>
-
-        <div className="text-xs text-center text-slate-500 dark:text-slate-400">
-          Arahkan kamera ke QR code yang ditampilkan admin
-        </div>
-
         <Button variant="secondary" onClick={handleClose}>
           Tutup
         </Button>
       </div>
-    </Modal>
+    </div>
   )
 }

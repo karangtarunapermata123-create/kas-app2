@@ -175,7 +175,14 @@ export default function KelolaUserPage() {
               </tr>
             </thead>
             <tbody>
-              {profiles.map((p) => (
+              {[...profiles]
+                .sort((a, b) => {
+                  const roleOrder: Record<string, number> = { super_admin: 0, admin: 1, member: 2 };
+                  const ro = (roleOrder[a.role] ?? 2) - (roleOrder[b.role] ?? 2);
+                  if (ro !== 0) return ro;
+                  return a.full_name.localeCompare(b.full_name, "id");
+                })
+                .map((p) => (
                 <tr key={p.id} className="border-t">
                   <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">
                     <div className="flex items-center gap-1 flex-wrap">

@@ -22,11 +22,50 @@ export async function updateUserRole(userId: string, role: UserRole): Promise<vo
 
 // Update nama user
 export async function updateUserName(userId: string, fullName: string): Promise<void> {
+  const newName = fullName.trim()
+
+  // Update nama di profiles
   const { error } = await supabase
     .from('profiles')
-    .update({ full_name: fullName.trim() })
+    .update({ full_name: newName })
     .eq('id', userId)
   if (error) throw error
+
+  // Sync 1: routine_members (bulanan) via profile_id
+  await supabase
+    .from('routine_members')
+    .update({ name: newName })
+    .eq('profile_id', userId)
+
+  // Sync 2: routine_sessions (arisan) — members tersimpan sebagai JSON
+  // Ambil semua sesi yang mengandung member dengan profile_id ini
+  const { data: sessionsData } = await supabase
+    .from('routine_sessions')
+    .select('id, members')
+    .not('members', 'is', null)
+
+  if (sessionsData && sessionsData.length > 0) {
+    for (const session of sessionsData) {
+      let members: Array<{ id: string; name: string; profileId?: string; categoryIds?: string[] }> = []
+      try {
+        members = typeof session.members === 'string'
+          ? JSON.parse(session.members)
+          : session.members ?? []
+      } catch {
+        continue
+      }
+      const hasMatch = members.some((m) => m.profileId === userId)
+      if (!hasMatch) continue
+
+      const updated = members.map((m) =>
+        m.profileId === userId ? { ...m, name: newName } : m,
+      )
+      await supabase
+        .from('routine_sessions')
+        .update({ members: JSON.stringify(updated) })
+        .eq('id', session.id)
+    }
+  }
 }
 
 // Buat akun baru via Supabase Admin (pakai service role) — tidak bisa dari client

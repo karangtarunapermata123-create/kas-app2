@@ -56,6 +56,7 @@ export type Transaction = {
 export type RoutineMember = {
   id: string;
   name: string;
+  profileId?: string; // UUID referensi ke profiles.id (untuk sinkronisasi nama)
   categoryIds?: string[]; // Array of category IDs this member is part of
 };
 

@@ -61,6 +61,7 @@ type AuthContextValue = {
   user: User | null;
   profile: Profile | null;
   loading: boolean;
+  refreshProfile: () => Promise<void>;
   signIn: (
     email: string,
     password: string,
@@ -129,6 +130,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: null };
   }
 
+  async function refreshProfile() {
+    const userId = user?.id;
+    if (userId) await fetchProfile(userId);
+  }
+
   async function signOut() {
     await supabase.auth.signOut();
     setProfile(null);
@@ -136,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, user, profile, loading, signIn, signOut }}
+      value={{ session, user, profile, loading, refreshProfile, signIn, signOut }}
     >
       {children}
     </AuthContext.Provider>

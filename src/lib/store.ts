@@ -487,18 +487,14 @@ export async function getRoutineMembers(
     .order("created_at", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((m) => {
-    // Handle both old and new schema for backward compatibility
     let categoryIds: string[] = [];
     if (m.category_ids !== undefined) {
       categoryIds = m.category_ids ?? [];
-    } else {
-      // Convert old joins_kas and joins_arisan to category ids (we'll use placeholder ids since we don't have real ones)
-      // But we need at least one category to be compatible, so let's just return empty for now
-      // In a real migration, we'd map to existing category ids
     }
     return {
       id: m.id,
       name: m.name,
+      profileId: m.profile_id ?? undefined,
       categoryIds,
     };
   });
@@ -508,64 +504,38 @@ export async function saveRoutineMembers(
   bookId: string,
   members: RoutineMember[],
 ): Promise<void> {
-  // Hapus semua lalu insert ulang
   await supabase.from("routine_members").delete().eq("book_id", bookId);
   if (members.length === 0) return;
-  
-  // Try inserting with new column first, if that fails try old columns
-  try {
-    const rows = members.map((m) => ({
-      id: m.id,
-      book_id: bookId,
-      name: m.name,
-      category_ids: m.categoryIds ?? [],
-    }));
-    const { error } = await supabase.from("routine_members").insert(rows);
-    if (error) throw error;
-  } catch (e) {
-    // Fallback to old schema if new column doesn't exist yet
-    const rows = members.map((m) => ({
-      id: m.id,
-      book_id: bookId,
-      name: m.name,
-      joins_kas: true,
-      joins_arisan: true,
-    }));
-    const { error } = await supabase.from("routine_members").insert(rows);
-    if (error) throw error;
-  }
+  const rows = members.map((m) => ({
+    id: m.id,
+    book_id: bookId,
+    name: m.name,
+    profile_id: m.profileId ?? null,
+    category_ids: m.categoryIds ?? [],
+  }));
+  const { error } = await supabase.from("routine_members").insert(rows);
+  if (error) throw error;
 }
 
 export async function addRoutineMember(
   bookId: string,
   name: string,
+  profileId?: string,
 ): Promise<RoutineMember> {
   const m: RoutineMember = {
     id: uid("rm"),
     name: name.trim(),
+    profileId: profileId ?? undefined,
     categoryIds: [],
   };
-  
-  // Try inserting with new column first, if that fails try old columns
-  try {
-    const { error } = await supabase.from("routine_members").insert({
-      id: m.id,
-      book_id: bookId,
-      name: m.name,
-      category_ids: [],
-    });
-    if (error) throw error;
-  } catch (e) {
-    const { error } = await supabase.from("routine_members").insert({
-      id: m.id,
-      book_id: bookId,
-      name: m.name,
-      joins_kas: true,
-      joins_arisan: true,
-    });
-    if (error) throw error;
-  }
-  
+  const { error } = await supabase.from("routine_members").insert({
+    id: m.id,
+    book_id: bookId,
+    name: m.name,
+    profile_id: m.profileId ?? null,
+    category_ids: [],
+  });
+  if (error) throw error;
   return m;
 }
 

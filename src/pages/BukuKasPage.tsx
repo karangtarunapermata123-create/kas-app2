@@ -703,6 +703,9 @@ export default function BukuKasPage() {
 
   function applySelectedMembers() {
     const currentMembers = isEditMode ? editRoutineMembers : newRoutineMembers;
+    const memberIdByProfileId = new Map(
+      currentMembers.map((m) => [m.profileId ?? m.name.trim().toLowerCase(), m.id]),
+    );
     const memberIdByName = new Map(
       currentMembers.map((m) => [m.name.trim().toLowerCase(), m.id]),
     );
@@ -711,8 +714,11 @@ export default function BukuKasPage() {
       selectedProfileIds.has(p.id),
     );
     const members: RoutineMember[] = selectedProfiles.map((p) => ({
-      id: memberIdByName.get(p.full_name.trim().toLowerCase()) ?? uid("rm"),
+      id: memberIdByProfileId.get(p.id)
+        ?? memberIdByName.get(p.full_name.trim().toLowerCase())
+        ?? uid("rm"),
       name: p.full_name,
+      profileId: p.id,
       categoryIds: Array.from(selectedMemberCategoryIds[p.id] || []),
     }));
 
@@ -1356,7 +1362,7 @@ export default function BukuKasPage() {
                             </label>
                           );
                         })()}
-                        {allProfiles.map((profile) => {
+                        {[...allProfiles].sort((a, b) => a.full_name.localeCompare(b.full_name, "id")).map((profile) => {
                         const memberCatIds = selectedMemberCategoryIds[profile.id] || new Set();
                         const isChecked = memberCatIds.has(memberSettingsTab);
                         return (
