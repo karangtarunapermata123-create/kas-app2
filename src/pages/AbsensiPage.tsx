@@ -33,6 +33,24 @@ import {
 import type { Activity, ActivitySession, AttendanceRecord } from "../lib/types";
 import { formatDate } from "../lib/date";
 
+// Icon scan QR modern — viewfinder dengan garis sudut
+function IconScanQR({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      {/* Sudut kiri atas */}
+      <path d="M3 9V5a2 2 0 0 1 2-2h4" />
+      {/* Sudut kanan atas */}
+      <path d="M15 3h4a2 2 0 0 1 2 2v4" />
+      {/* Sudut kanan bawah */}
+      <path d="M21 15v4a2 2 0 0 1-2 2h-4" />
+      {/* Sudut kiri bawah */}
+      <path d="M9 21H5a2 2 0 0 1-2-2v-4" />
+      {/* Garis scan */}
+      <line x1="7" y1="12" x2="17" y2="12" />
+    </svg>
+  );
+}
+
 // ─── Shared: tabel absensi ────────────────────────────────────────────────────
 
 type AttendanceTableProps = {
@@ -1120,21 +1138,7 @@ export default function AbsensiPage() {
                 setOpenQRScanner(true);
               }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-7 w-7"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
+              <IconScanQR className="h-7 w-7" />
             </button>
           )}
         </div>
@@ -1517,9 +1521,7 @@ export default function AbsensiPage() {
                                   className="flex items-center justify-center px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-xs font-medium transition"
                                   aria-label="QR sesi"
                                 >
-                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden="true">
-                                    <rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" />
-                                  </svg>
+                                  <IconScanQR className="h-3.5 w-3.5" />
                                 </button>
                                 {/* Hapus */}
                                 <button
@@ -1623,21 +1625,7 @@ export default function AbsensiPage() {
                 setOpenQRScanner(true);
               }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-7 w-7"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
+              <IconScanQR className="h-7 w-7" />
             </button>
           )}
 
@@ -1994,21 +1982,7 @@ export default function AbsensiPage() {
                 setOpenQRScanner(true);
               }}
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-7 w-7"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="7" height="7" />
-                <rect x="14" y="3" width="7" height="7" />
-                <rect x="14" y="14" width="7" height="7" />
-                <rect x="3" y="14" width="7" height="7" />
-              </svg>
+              <IconScanQR className="h-7 w-7" />
             </button>
           )}
         </div>
