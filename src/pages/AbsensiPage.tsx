@@ -1833,13 +1833,12 @@ export default function AbsensiPage() {
                 <thead>
                   <tr className="border-b-2 border-slate-200 dark:border-slate-700">
                     <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Nama Kegiatan</th>
-                    <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tipe</th>
-                    <th className="py-3 pr-3 text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tanggal</th>
                     {userCanEdit && (
                       <th className="py-3 pr-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                         {editMode ? "Aksi" : ""}
                       </th>
                     )}
+                    <th className="py-3 pr-3 text-right text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Tanggal</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1855,17 +1854,21 @@ export default function AbsensiPage() {
                         onClick={() => !editMode && navigate(`/absensi/${activity.id}`)}
                       >
                         <td className="py-3 pr-3 pl-3">
-                          <span className="text-sm font-medium text-slate-900 dark:text-white">
-                            {activity.name}
-                          </span>
-                        </td>
-                        <td className="py-3 pr-3 font-medium text-slate-600 dark:text-slate-400">
-                          {activity.type === "rutin"
-                            ? `Rutin · ${activity.frequency === "bulanan" ? "Bulanan" : "Mingguan"}`
-                            : "Sekali"}
-                        </td>
-                        <td className="py-3 pr-3 whitespace-nowrap text-slate-600 dark:text-slate-400">
-                          <span className="tabular-nums">{activity.date}</span>
+                          <div className="flex items-center gap-2">
+                            {activity.type === "rutin" ? (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 shrink-0 text-violet-500 dark:text-violet-400" aria-hidden="true">
+                                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                                <path d="M21 3v5h-5" />
+                              </svg>
+                            ) : (
+                              <span className="h-4 w-4 shrink-0 text-sky-500 dark:text-sky-400 flex items-center justify-center" aria-hidden="true">
+                                ●
+                              </span>
+                            )}
+                            <span className="text-sm font-medium text-slate-900 dark:text-white">
+                              {activity.name}
+                            </span>
+                          </div>
                         </td>
                         {userCanEdit && (
                           <td
@@ -1892,6 +1895,9 @@ export default function AbsensiPage() {
                             )}
                           </td>
                         )}
+                        <td className="py-3 pr-3 whitespace-nowrap text-right text-slate-600 dark:text-slate-400">
+                          <span className="tabular-nums">{activity.date}</span>
+                        </td>
                       </tr>
                     );
                   })}

@@ -137,7 +137,7 @@ function AppShell() {
   const navigate = useNavigate();
   const { profile, signOut: _signOut } = useAuth();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [headerTitle, setHeaderTitle] = useState("Kas");
+  const [headerTitle, setHeaderTitle] = useState("Karang Taruna Permata");
   const [headerBackTo, setHeaderBackTo] = useState<string | undefined>(
     undefined,
   );
@@ -162,7 +162,7 @@ function AppShell() {
   useEffect(() => {
     let cancelled = false;
     async function computeHeader() {
-      let title = "Kas";
+      let title = "Karang Taruna Permata";
       let backTo: string | undefined = undefined;
 
       const resolveBookBackTo = (
@@ -274,7 +274,23 @@ function AppShell() {
             isSidebarCollapsed ? "w-14" : "w-48"
           }`}
         >
-          <nav className="flex-1 space-y-1 px-2 pt-4">
+          <div className={`flex items-center border-b dark:border-slate-800 h-12 overflow-hidden ${
+            isSidebarCollapsed ? "justify-center px-2" : "px-4"
+          }`}>
+            <img
+              src="/logo.png"
+              alt="Logo"
+              className="h-10 w-10 shrink-0 object-contain"
+            />
+            <span className={`text-sm font-bold text-slate-900 dark:text-white leading-tight whitespace-normal transition-[max-width,opacity,margin] duration-300 ease-in-out ${
+              isSidebarCollapsed
+                ? "max-w-0 opacity-0 ml-0 overflow-hidden"
+                : "max-w-[12rem] opacity-100 ml-2"
+            }`}>
+              Karang Taruna Permata
+            </span>
+          </div>
+          <nav className="flex-1 space-y-1 px-2 pt-3">
             <NavLink
               to="/buku-kas"
               className={({ isActive }) => navLinkClass(isActive)}
@@ -333,8 +349,15 @@ function AppShell() {
           {/* Header mobile */}
           <header className="sticky top-0 z-30 border-b bg-white dark:bg-slate-900 dark:border-slate-800 md:hidden">
             <div className="flex items-center justify-between gap-3 px-4 py-1.5">
-              <div className="min-w-0 text-base font-bold text-slate-900 dark:text-white truncate">
-                {header.title}
+              <div className="flex items-center gap-2 min-w-0">
+                <img
+                  src="/logo.png"
+                  alt="Logo"
+                  className="h-9 w-9 shrink-0 object-contain"
+                />
+                <div className="text-base font-bold text-slate-900 dark:text-white truncate">
+                  {header.title}
+                </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {header.backTo ? (
