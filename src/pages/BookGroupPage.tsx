@@ -67,13 +67,13 @@ export default function BookGroupPage() {
           {formatIDR(bookStats[groupBook.id] ?? 0)}
         </div>
         <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-          {memberBooks.length} card di dalam group ini
+          {memberBooks.length} kas di dalam group ini
         </div>
       </div>
 
       {memberBooks.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
-          Belum ada card buku kas di dalam group ini.
+          Belum ada kas buku kas di dalam group ini.
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">

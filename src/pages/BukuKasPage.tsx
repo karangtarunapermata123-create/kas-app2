@@ -846,7 +846,7 @@ export default function BukuKasPage() {
   function getBookTypeLabel(book: Book) {
     if (book.type === "group") {
       const memberCount = getGroupMemberCount(book.id);
-      return `Group Buku • ${memberCount} card`;
+      return `Group Buku • ${memberCount} kas`;
     }
 
     const baseLabel =
@@ -884,34 +884,90 @@ export default function BukuKasPage() {
                 : `/buku-kas/${b.id}`;
           const totalSaldo = bookStats[b.id] ?? 0;
 
+          const getBookTypeColor = (book: Book) => {
+            if (book.type === "group") return "bg-purple-500";
+            if (book.type === "rutin") return "bg-blue-500";
+            if (book.type === "kolektif") return "bg-emerald-500";
+            return "bg-amber-500";
+          };
+
+          const getBookTypeIcon = (book: Book) => {
+            if (book.type === "group") {
+              return (
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+              );
+            }
+            if (book.type === "rutin") {
+              return (
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+              );
+            }
+            if (book.type === "kolektif") {
+              return (
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              );
+            }
+            return (
+              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            );
+          };
+
           return (
-            <NavLink key={b.id} to={href} className="block">
-              <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 transition-all duration-200 hover:shadow-md hover:-translate-y-0.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-slate-800 dark:text-slate-100">
-                    {b.name}
+            <NavLink key={b.id} to={href} className="block group">
+              <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 transition-all duration-200 hover:shadow-lg hover:border-slate-300 dark:hover:border-slate-600 hover:-translate-y-1">
+                <div className="p-4">
+                  {/* Book name and type badge */}
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <h3 className="text-sm font-semibold leading-snug text-slate-900 dark:text-slate-100 line-clamp-2">
+                      {b.name}
+                    </h3>
+                    <div className="flex items-center gap-1.5 text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      {getBookTypeIcon(b)}
+                      <span>
+                        {isGroupBook
+                          ? "Group"
+                          : isRoutineBook
+                            ? "Rutin"
+                            : isKolektifBook
+                              ? "Kolektif"
+                              : "Transaksi"}
+                      </span>
+                    </div>
                   </div>
+
+                  {/* Group info */}
                   {isGroupBook ? (
-                    <span className="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-700 dark:text-slate-200">
-                      Group
-                    </span>
+                    <div className="mb-3 flex items-center gap-1.5 rounded-lg bg-slate-50 dark:bg-slate-700/50 px-2.5 py-1.5">
+                      <svg className="h-3.5 w-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                      </svg>
+                      <span className="text-xs text-slate-600 dark:text-slate-300">
+                        {getGroupMemberCount(b.id)} kas
+                      </span>
+                    </div>
                   ) : null}
+
+                  {/* Balance section */}
+                  <div className="flex items-center justify-between rounded-lg bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700/50 dark:to-slate-800/50 px-3 py-2.5">
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      Saldo
+                    </span>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-50 tabular-nums">
+                      {formatIDR(totalSaldo)}
+                    </div>
+                  </div>
                 </div>
 
-                {isGroupBook ? (
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    {getGroupMemberCount(b.id)} card di dalam group
-                  </div>
-                ) : null}
-
-                <div className="mt-auto">
-                  <div className="text-[10px] font-medium text-slate-400 dark:text-slate-500 mb-0.5 uppercase tracking-wide">
-                    Saldo
-                  </div>
-                  <div className="text-sm font-bold text-slate-900 dark:text-slate-50 tabular-nums">
-                    {formatIDR(totalSaldo)}
-                  </div>
-                </div>
+                {/* Hover overlay */}
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-900/5 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100 pointer-events-none" />
               </div>
             </NavLink>
           );
