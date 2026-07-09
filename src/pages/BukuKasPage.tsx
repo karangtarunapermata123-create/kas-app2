@@ -53,6 +53,7 @@ export default function BukuKasPage() {
   const [openDeleteBookModal, setOpenDeleteBookModal] = useState(false);
   const [editingBookId, setEditingBookId] = useState<string | null>(null);
   const [editBookName, setEditBookName] = useState("");
+  const [deleteBookConfirmText, setDeleteBookConfirmText] = useState("");
   const [books, setBooks] = useState<Book[]>([]);
   const [currentBook, setCurrentBook] = useState<Book | undefined>(undefined);
   const [bookStats, setBookStats] = useState<Record<string, number>>({});
@@ -1310,25 +1311,44 @@ export default function BukuKasPage() {
       <Modal
         open={openDeleteBookModal}
         title="Konfirmasi"
-        onClose={() => setOpenDeleteBookModal(false)}
+        onClose={() => {
+          setOpenDeleteBookModal(false);
+          setDeleteBookConfirmText("");
+        }}
       >
         <div className="grid gap-4">
           <div className="text-sm text-slate-700">
             Hapus buku kas ini? Semua data di buku ini akan hilang.
           </div>
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Ketik <span className="font-bold text-rose-600">HAPUS</span> untuk konfirmasi
+            </div>
+            <input
+              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-600/30"
+              placeholder="Ketik HAPUS"
+              value={deleteBookConfirmText}
+              onChange={(e) => setDeleteBookConfirmText(e.target.value)}
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              onClick={() => setOpenDeleteBookModal(false)}
+              onClick={() => {
+                setOpenDeleteBookModal(false);
+                setDeleteBookConfirmText("");
+              }}
             >
               Batal
             </Button>
             <Button
               variant="danger"
+              disabled={deleteBookConfirmText !== "HAPUS"}
               onClick={() => {
                 if (editingBookId) removeBook(editingBookId);
                 setOpenDeleteBookModal(false);
                 setOpenEditBook(false);
+                setDeleteBookConfirmText("");
               }}
             >
               Hapus

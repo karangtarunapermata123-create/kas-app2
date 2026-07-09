@@ -14,6 +14,7 @@ import type {
   RoutineFrequency,
   RoutineSession,
   KolektifConfig,
+  KolektifColumnType,
   KolektifRow,
   KolektifSession,
   Activity,
@@ -129,13 +130,41 @@ export async function getKolektifConfig(
   const headerLabel = configRes.data?.header_label ?? "Nama";
   const nominalLabel = configRes.data?.nominal_label ?? "Nominal";
   const noteLabel = configRes.data?.note_label ?? "Keterangan";
-  const rows: KolektifRow[] = (rowsRes.data ?? []).map((r) => ({
-    id: r.id,
-    label: r.label,
-    amount: r.amount,
-    note: r.note ?? undefined,
-  }));
-  return { sessionId, headerLabel, nominalLabel, noteLabel, rows };
+  
+  // Try to get column types, default to text/number/text if not available
+  let headerLabelType: KolektifColumnType = "text";
+  let nominalLabelType: KolektifColumnType = "number";
+  let noteLabelType: KolektifColumnType = "text";
+  
+  if (configRes.data) {
+    const data = configRes.data as any;
+    if (data.header_column_type !== undefined) headerLabelType = data.header_column_type;
+    if (data.nominal_column_type !== undefined) nominalLabelType = data.nominal_column_type;
+    if (data.note_column_type !== undefined) noteLabelType = data.note_column_type;
+  }
+  
+  const rows: KolektifRow[] = (rowsRes.data ?? []).map((r) => {
+    const rowData = r as any;
+    return {
+      id: r.id,
+      label: r.label,
+      amount: r.amount,
+      headerValue: rowData.header_value ?? undefined,
+      noteValue: rowData.note_value ?? undefined,
+      note: r.note ?? undefined,
+    };
+  });
+  
+  return { 
+    sessionId, 
+    headerLabel, 
+    nominalLabel, 
+    noteLabel, 
+    headerLabelType,
+    nominalLabelType,
+    noteLabelType,
+    rows 
+  };
 }
 
 export async function updateKolektifLabels(
@@ -144,6 +173,9 @@ export async function updateKolektifLabels(
     headerLabel?: string;
     nominalLabel?: string;
     noteLabel?: string;
+    headerLabelType?: KolektifColumnType;
+    nominalLabelType?: KolektifColumnType;
+    noteLabelType?: KolektifColumnType;
   },
 ): Promise<void> {
   const update: Record<string, string> = {};
@@ -153,11 +185,39 @@ export async function updateKolektifLabels(
     update.nominal_label = labels.nominalLabel.trim() || "Nominal";
   if (labels.noteLabel !== undefined)
     update.note_label = labels.noteLabel.trim() || "Keterangan";
+  if (labels.headerLabelType !== undefined)
+    update.header_column_type = labels.headerLabelType;
+  if (labels.nominalLabelType !== undefined)
+    update.nominal_column_type = labels.nominalLabelType;
+  if (labels.noteLabelType !== undefined)
+    update.note_column_type = labels.noteLabelType;
+  
   const { error } = await supabase.from("kolektif_config").upsert({
     session_id: sessionId,
     ...update,
   });
-  if (error) throw error;
+  
+  // If error is about missing columns (migration not run), try without column types
+  if (error) {
+    const errMsg = (error as any)?.message ?? "";
+    if (errMsg.includes("column") || errMsg.includes("does not exist")) {
+      const basicUpdate: Record<string, string> = {};
+      if (labels.headerLabel !== undefined)
+        basicUpdate.header_label = labels.headerLabel.trim() || "Nama";
+      if (labels.nominalLabel !== undefined)
+        basicUpdate.nominal_label = labels.nominalLabel.trim() || "Nominal";
+      if (labels.noteLabel !== undefined)
+        basicUpdate.note_label = labels.noteLabel.trim() || "Keterangan";
+      
+      const { error: basicError } = await supabase.from("kolektif_config").upsert({
+        session_id: sessionId,
+        ...basicUpdate,
+      });
+      if (basicError) throw basicError;
+    } else {
+      throw error;
+    }
+  }
 }
 
 export async function addKolektifRow(
@@ -166,6 +226,8 @@ export async function addKolektifRow(
   label: string,
   amount: number,
   note?: string,
+  headerValue?: number,
+  noteValue?: number,
 ): Promise<void> {
   const { data: existing } = await supabase
     .from("kolektif_rows")
@@ -174,7 +236,9 @@ export async function addKolektifRow(
     .order("sort_order", { ascending: false })
     .limit(1);
   const nextOrder = (existing?.[0]?.sort_order ?? 0) + 1;
-  const { error } = await supabase.from("kolektif_rows").insert({
+  
+  // Build basic row data (always works)
+  const rowData: any = {
     id: uid("kr"),
     session_id: sessionId,
     book_id: bookId,
@@ -182,8 +246,32 @@ export async function addKolektifRow(
     amount,
     note: note ?? null,
     sort_order: nextOrder,
-  });
-  if (error) throw error;
+  };
+  
+  // Try to insert with basic data first
+  const { error: basicError } = await supabase.from("kolektif_rows").insert(rowData);
+  if (basicError) throw basicError;
+  
+  // If we have numeric values, try to update them (will work if migration has been run)
+  if (headerValue || noteValue) {
+    const updateData: any = {};
+    if (headerValue) updateData.header_value = headerValue;
+    if (noteValue) updateData.note_value = noteValue;
+    
+    if (Object.keys(updateData).length > 0) {
+      const { error: updateError } = await supabase
+        .from("kolektif_rows")
+        .update(updateData)
+        .eq("id", rowData.id);
+      // Ignore error if columns don't exist yet
+      if (updateError) {
+        const errMsg = (updateError as any)?.message ?? "";
+        if (!errMsg.includes("column") && !errMsg.includes("does not exist")) {
+          console.warn("Could not update numeric columns:", updateError);
+        }
+      }
+    }
+  }
 }
 
 export async function updateKolektifRow(
@@ -191,12 +279,36 @@ export async function updateKolektifRow(
   label: string,
   amount: number,
   note?: string,
+  headerValue?: number,
+  noteValue?: number,
 ): Promise<void> {
-  const { error } = await supabase
-    .from("kolektif_rows")
-    .update({ label: label.trim(), amount, note: note ?? null })
-    .eq("id", rowId);
-  if (error) throw error;
+  const update: Record<string, unknown> = {
+    label: label.trim(),
+    amount,
+    note: note ?? null,
+  };
+  if (headerValue !== undefined) update.header_value = headerValue;
+  if (noteValue !== undefined) update.note_value = noteValue;
+  
+  try {
+    const { error } = await supabase
+      .from("kolektif_rows")
+      .update(update)
+      .eq("id", rowId);
+    if (error) throw error;
+  } catch (error) {
+    // If update fails due to missing columns, try without the numeric columns
+    const basicUpdate: Record<string, unknown> = {
+      label: label.trim(),
+      amount,
+      note: note ?? null,
+    };
+    const { error: basicError } = await supabase
+      .from("kolektif_rows")
+      .update(basicUpdate)
+      .eq("id", rowId);
+    if (basicError) throw basicError;
+  }
 }
 
 export async function deleteKolektifRow(rowId: string): Promise<void> {
@@ -397,11 +509,18 @@ export async function getBookSaldo(book: Book): Promise<number> {
     const totals = await Promise.all(
       sessions.map((s) => getKolektifConfig(s.id)),
     );
-    return totals.reduce(
-      (sum, cfg) =>
-        sum + cfg.rows.reduce((rowSum, row) => rowSum + row.amount, 0),
-      0,
-    );
+    return totals.reduce((sum, cfg) => {
+      return sum + cfg.rows.reduce((rowSum, row) => {
+        let r = rowSum + row.amount; // nominal column always included
+        if (cfg.headerLabelType === "number") {
+          r += (row.headerValue ?? (Number(row.label) || 0));
+        }
+        if (cfg.noteLabelType === "number") {
+          r += (row.noteValue ?? (Number(row.note) || 0));
+        }
+        return r;
+      }, 0);
+    }, 0);
   }
 
   const tx = await getTransactions(book.id);

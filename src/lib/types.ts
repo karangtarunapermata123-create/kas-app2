@@ -20,14 +20,21 @@ export type KolektifRow = {
   id: string;
   label: string;
   amount: number;
+  headerValue?: number;
+  noteValue?: number;
   note?: string;
 };
+
+export type KolektifColumnType = "text" | "number";
 
 export type KolektifConfig = {
   sessionId: string;
   headerLabel: string;
   nominalLabel: string;
   noteLabel: string;
+  headerLabelType: KolektifColumnType;
+  nominalLabelType: KolektifColumnType;
+  noteLabelType: KolektifColumnType;
   rows: KolektifRow[];
 };
 

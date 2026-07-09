@@ -58,7 +58,16 @@ export default function KolektifPage() {
     await Promise.all(
       list.map(async (s) => {
         const cfg = await getKolektifConfig(s.id);
-        totals[s.id] = cfg.rows.reduce((sum, r) => sum + r.amount, 0);
+        totals[s.id] = cfg.rows.reduce((sum, r) => {
+          let rowTotal = r.amount; // nominal column
+          if (cfg.headerLabelType === "number") {
+            rowTotal += (r.headerValue ?? (Number(r.label) || 0));
+          }
+          if (cfg.noteLabelType === "number") {
+            rowTotal += (r.noteValue ?? (Number(r.note) || 0));
+          }
+          return sum + rowTotal;
+        }, 0);
       }),
     );
     setSessionTotals(totals);

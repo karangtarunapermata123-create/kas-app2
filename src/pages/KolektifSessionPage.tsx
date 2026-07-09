@@ -35,6 +35,9 @@ export default function KolektifSessionPage() {
     headerLabel: "Nama",
     nominalLabel: "Nominal",
     noteLabel: "Keterangan",
+    headerLabelType: "text",
+    nominalLabelType: "number",
+    noteLabelType: "text",
     rows: [],
   });
   const [loading, setLoading] = useState(true);
@@ -44,6 +47,8 @@ export default function KolektifSessionPage() {
   const [editingRow, setEditingRow] = useState<KolektifRow | null>(null);
   const [rowLabel, setRowLabel] = useState("");
   const [rowAmount, setRowAmount] = useState("");
+  const [rowHeaderValue, setRowHeaderValue] = useState("");
+  const [rowNoteValue, setRowNoteValue] = useState("");
   const [rowNote, setRowNote] = useState("");
 
   // Modal edit header
@@ -51,10 +56,14 @@ export default function KolektifSessionPage() {
   const [headerInput, setHeaderInput] = useState("");
   const [nominalInput, setNominalInput] = useState("");
   const [noteHeaderInput, setNoteHeaderInput] = useState("");
+  const [headerType, setHeaderType] = useState<"text" | "number">("text");
+  const [nominalType, setNominalType] = useState<"text" | "number">("number");
+  const [noteType, setNoteType] = useState<"text" | "number">("text");
 
   // Modal hapus
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
   const [deletingRow, setDeletingRow] = useState<KolektifRow | null>(null);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [saving, setSaving] = useState(false);
 
@@ -73,6 +82,8 @@ export default function KolektifSessionPage() {
     setEditingRow(null);
     setRowLabel("");
     setRowAmount("");
+    setRowHeaderValue("");
+    setRowNoteValue("");
     setRowNote("");
     setOpenRowModal(true);
   }
@@ -81,22 +92,56 @@ export default function KolektifSessionPage() {
     setEditingRow(row);
     setRowLabel(row.label);
     setRowAmount(String(row.amount));
-    setRowNote(row.note ?? "");
+    setRowHeaderValue(String(row.headerValue ?? ""));
+    // For number columns, try noteValue first, then fallback to parsing note text
+    if (config.noteLabelType === "number") {
+      setRowNoteValue(String(row.noteValue ?? row.note ?? ""));
+      setRowNote("");
+    } else {
+      setRowNoteValue("");
+      setRowNote(row.note ?? "");
+    }
     setOpenRowModal(true);
   }
 
   async function saveRow() {
-    const label = rowLabel.trim();
+    if (!confirm("Simpan perubahan baris ini?")) return;
+    
     const amount = Number(rowAmount.replace(/\D/g, "")) || 0;
-    if (!label) return;
+    const headerValue = Number(rowHeaderValue.replace(/\D/g, "")) || 0;
+    const noteValue = Number(rowNoteValue.replace(/\D/g, "")) || 0;
+    
     setSaving(true);
     try {
+      let label: string;
+      let noteText: string | undefined;
+      
+      // Handle header column
+      if (config.headerLabelType === "number") {
+        label = String(headerValue);
+      } else {
+        label = rowLabel.trim();
+        if (!label) {
+          setSaving(false);
+          return;
+        }
+      }
+      
+      // Handle note column
+      if (config.noteLabelType === "number") {
+        noteText = String(noteValue) || undefined;
+      } else {
+        noteText = rowNote.trim() || undefined;
+      }
+      
       if (editingRow) {
         await updateKolektifRow(
           editingRow.id,
-          label,
+          config.headerLabelType === "number" ? String(headerValue) : editingRow.label,
           amount,
-          rowNote.trim() || undefined,
+          noteText,
+          headerValue,
+          noteValue,
         );
       } else {
         await addKolektifRow(
@@ -104,11 +149,16 @@ export default function KolektifSessionPage() {
           safeBookId,
           label,
           amount,
-          rowNote.trim() || undefined,
+          noteText,
+          headerValue,
+          noteValue,
         );
       }
       await refresh();
       setOpenRowModal(false);
+    } catch (error) {
+      console.error("Error saving row:", error);
+      alert("Gagal menyimpan data. Pastikan database sudah di-migrate: jalankan migration_add_kolektif_numeric_columns.sql");
     } finally {
       setSaving(false);
     }
@@ -116,12 +166,17 @@ export default function KolektifSessionPage() {
 
   // ── Header modal ──
   async function saveHeader() {
+    if (!confirm("Simpan perubahan nama dan tipe kolom?")) return;
+    
     setSaving(true);
     try {
       await updateKolektifLabels(safeSessionId, {
         headerLabel: headerInput,
         nominalLabel: nominalInput,
         noteLabel: noteHeaderInput,
+        headerLabelType: headerType,
+        nominalLabelType: nominalType,
+        noteLabelType: noteType,
       });
       await refresh();
       setOpenHeaderModal(false);
@@ -133,18 +188,32 @@ export default function KolektifSessionPage() {
   // ── Delete ──
   async function doDelete() {
     if (!deletingRow) return;
+    if (deleteConfirmText !== "HAPUS") return;
     setSaving(true);
     try {
       await deleteKolektifRow(deletingRow.id);
       await refresh();
       setOpenDeleteModal(false);
       setDeletingRow(null);
+      setDeleteConfirmText("");
     } finally {
       setSaving(false);
     }
   }
 
-  const totalAmount = config.rows.reduce((s, r) => s + r.amount, 0);
+  const totalAmount = config.rows.reduce((s, r) => {
+    let sum = s;
+    if (config.headerLabelType === "number") {
+      sum += (r.headerValue ?? (Number(r.label) || 0));
+    }
+    if (config.nominalLabelType === "number") {
+      sum += r.amount;
+    }
+    if (config.noteLabelType === "number") {
+      sum += (r.noteValue ?? (Number(r.note) || 0));
+    }
+    return sum;
+  }, 0);
 
   if (loading) {
     return (
@@ -176,12 +245,33 @@ export default function KolektifSessionPage() {
 
   return (
     <div className="grid gap-4">
-      {/* Tombol tambah */}
-      {userCanEdit && (
-        <div className="flex justify-end">
+      {/* Header: total saldo + tombol tambah */}
+      <div className="flex items-center justify-between gap-3">
+        {config.rows.length > 0 && (
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-3 flex items-center gap-4">
+            <div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Total Saldo
+              </div>
+              <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                {formatIDR(totalAmount)}
+              </div>
+            </div>
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-700" />
+            <div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                Baris
+              </div>
+              <div className="text-lg font-bold text-slate-900 dark:text-white">
+                {config.rows.length}
+              </div>
+            </div>
+          </div>
+        )}
+        {userCanEdit && (
           <Button onClick={openAddRow}>+ Tambah</Button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Tabel */}
       <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
@@ -198,103 +288,45 @@ export default function KolektifSessionPage() {
           <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
             <tr>
               <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
-                <div className="flex items-center gap-2">
-                  <span>{config.headerLabel}</span>
-                  {userCanEdit && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHeaderInput(config.headerLabel);
-                        setNominalInput(config.nominalLabel);
-                        setNoteHeaderInput(config.noteLabel);
-                        setOpenHeaderModal(true);
-                      }}
-                      className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      title="Ubah nama header"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
-              </th>
-              <th className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-right">
-                <div className="flex items-center gap-2 justify-end">
-                  <span>{config.nominalLabel}</span>
-                  {userCanEdit && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHeaderInput(config.headerLabel);
-                        setNominalInput(config.nominalLabel);
-                        setNoteHeaderInput(config.noteLabel);
-                        setOpenHeaderModal(true);
-                      }}
-                      className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      title="Ubah nama header"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                <span>{config.headerLabel}</span>
               </th>
               <th className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
-                <div className="flex items-center gap-2">
-                  <span>{config.noteLabel}</span>
-                  {userCanEdit && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHeaderInput(config.headerLabel);
-                        setNominalInput(config.nominalLabel);
-                        setNoteHeaderInput(config.noteLabel);
-                        setOpenHeaderModal(true);
-                      }}
-                      className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      title="Ubah nama header"
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        className="h-3.5 w-3.5"
-                      >
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+                <span>{config.nominalLabel}</span>
+              </th>
+              <th className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
+                <span>{config.noteLabel}</span>
               </th>
               {userCanEdit && (
-                <th className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3" />
+                <th className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderInput(config.headerLabel);
+                      setNominalInput(config.nominalLabel);
+                      setNoteHeaderInput(config.noteLabel);
+                      setHeaderType(config.headerLabelType);
+                      setNominalType(config.nominalLabelType);
+                      setNoteType(config.noteLabelType);
+                      setOpenHeaderModal(true);
+                    }}
+                    className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                    title="Ubah nama kolom"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-3.5 w-3.5"
+                    >
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
+                    </svg>
+                  </button>
+                </th>
               )}
             </tr>
           </thead>
@@ -323,14 +355,20 @@ export default function KolektifSessionPage() {
                       <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0">
                         {idx + 1}.
                       </span>
-                      <span className="truncate">{row.label}</span>
+                      <span className="truncate">
+                        {config.headerLabelType === "number" 
+                          ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
+                          : row.label}
+                      </span>
                     </div>
                   </td>
-                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right font-medium text-emerald-700 dark:text-emerald-400">
-                    {formatIDR(row.amount)}
+                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium text-emerald-700 dark:text-emerald-400">
+                    {config.nominalLabelType === "number" ? formatIDR(row.amount) : String(row.amount)}
                   </td>
                   <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 truncate text-xs">
-                    {row.note || "-"}
+                    {config.noteLabelType === "number"
+                      ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
+                      : (row.note || "-")}
                   </td>
                   {userCanEdit && (
                     <td
@@ -366,20 +404,6 @@ export default function KolektifSessionPage() {
                 </tr>
               ))
             )}
-            {config.rows.length > 0 && (
-              <tr className="bg-slate-50 dark:bg-slate-900 font-semibold">
-                <td className="sticky left-0 z-10 border-t-2 border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-slate-900 dark:text-white">
-                  Total
-                </td>
-                <td className="border-t-2 border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-right text-emerald-700 dark:text-emerald-400">
-                  {formatIDR(totalAmount)}
-                </td>
-                <td className="border-t-2 border-r border-slate-200 dark:border-slate-700" />
-                {userCanEdit && (
-                  <td className="border-t-2 border-slate-200 dark:border-slate-700" />
-                )}
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
@@ -395,17 +419,32 @@ export default function KolektifSessionPage() {
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
               {config.headerLabel}
             </div>
-            <Input
-              placeholder="Contoh: Budi Santoso"
-              value={rowLabel}
-              onChange={(e) => setRowLabel(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveRow()}
-              autoFocus
-            />
+            {config.headerLabelType === "number" ? (
+              <Input
+                placeholder="Contoh: 50000"
+                value={rowHeaderValue}
+                onChange={(e) => setRowHeaderValue(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                inputMode="numeric"
+              />
+            ) : (
+              <Input
+                placeholder="Contoh: Budi Santoso"
+                value={rowLabel}
+                onChange={(e) => setRowLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                autoFocus
+              />
+            )}
+            {config.headerLabelType === "number" && rowHeaderValue && Number(rowHeaderValue) > 0 && (
+              <div className="mt-1 text-xs text-slate-500">
+                {formatIDR(Number(rowHeaderValue))}
+              </div>
+            )}
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Nominal
+              {config.nominalLabel}
             </div>
             <Input
               placeholder="Contoh: 50000"
@@ -422,21 +461,39 @@ export default function KolektifSessionPage() {
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Keterangan
+              {config.noteLabel}
             </div>
-            <input
-              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
-              placeholder="Contoh: Budi dapat arisan"
-              value={rowNote}
-              onChange={(e) => setRowNote(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && saveRow()}
-            />
+            {config.noteLabelType === "number" ? (
+              <Input
+                placeholder="Contoh: 50000"
+                value={rowNoteValue}
+                onChange={(e) => setRowNoteValue(e.target.value.replace(/\D/g, ""))}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                inputMode="numeric"
+              />
+            ) : (
+              <input
+                className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+                placeholder="Contoh: Budi dapat arisan"
+                value={rowNote}
+                onChange={(e) => setRowNote(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
+              />
+            )}
+            {config.noteLabelType === "number" && rowNoteValue && Number(rowNoteValue) > 0 && (
+              <div className="mt-1 text-xs text-slate-500">
+                {formatIDR(Number(rowNoteValue))}
+              </div>
+            )}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpenRowModal(false)}>
               Batal
             </Button>
-            <Button onClick={saveRow} disabled={!rowLabel.trim() || saving}>
+            <Button 
+              onClick={saveRow} 
+              disabled={saving}
+            >
               {saving ? "Menyimpan..." : "Simpan"}
             </Button>
           </div>
@@ -446,13 +503,13 @@ export default function KolektifSessionPage() {
       {/* Modal edit header */}
       <Modal
         open={openHeaderModal}
-        title="Ubah Nama Kolom"
+        title="Ubah Nama & Tipe Kolom"
         onClose={() => setOpenHeaderModal(false)}
       >
         <div className="grid gap-4">
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Kolom Kiri
+              Kolom 1
             </div>
             <Input
               placeholder="Contoh: Nama Anggota"
@@ -461,10 +518,23 @@ export default function KolektifSessionPage() {
               onKeyDown={(e) => e.key === "Enter" && saveHeader()}
               autoFocus
             />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">
+                Tipe:
+              </label>
+              <select
+                value={headerType}
+                onChange={(e) => setHeaderType(e.target.value as "text" | "number")}
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka/Uang</option>
+              </select>
+            </div>
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Kolom Nominal
+              Kolom 2
             </div>
             <Input
               placeholder="Contoh: Nominal"
@@ -472,10 +542,23 @@ export default function KolektifSessionPage() {
               onChange={(e) => setNominalInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveHeader()}
             />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">
+                Tipe:
+              </label>
+              <select
+                value={nominalType}
+                onChange={(e) => setNominalType(e.target.value as "text" | "number")}
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka/Uang</option>
+              </select>
+            </div>
           </div>
           <div>
             <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Kolom Keterangan
+              Kolom 3
             </div>
             <Input
               placeholder="Contoh: Keterangan"
@@ -483,6 +566,19 @@ export default function KolektifSessionPage() {
               onChange={(e) => setNoteHeaderInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveHeader()}
             />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">
+                Tipe:
+              </label>
+              <select
+                value={noteType}
+                onChange={(e) => setNoteType(e.target.value as "text" | "number")}
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka/Uang</option>
+              </select>
+            </div>
           </div>
           <div className="flex justify-end gap-2">
             <Button
@@ -502,7 +598,7 @@ export default function KolektifSessionPage() {
       <Modal
         open={openDeleteModal}
         title="Hapus Baris"
-        onClose={() => setOpenDeleteModal(false)}
+        onClose={() => { setOpenDeleteModal(false); setDeleteConfirmText(""); }}
       >
         <div className="grid gap-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -512,17 +608,28 @@ export default function KolektifSessionPage() {
             </span>
             ?
           </p>
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Ketik <span className="font-bold text-rose-600">HAPUS</span> untuk konfirmasi
+            </div>
+            <input
+              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-600/30"
+              placeholder="Ketik HAPUS"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+            />
+          </div>
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              onClick={() => setOpenDeleteModal(false)}
+              onClick={() => { setOpenDeleteModal(false); setDeleteConfirmText(""); }}
             >
               Batal
             </Button>
             <button
               type="button"
               onClick={doDelete}
-              disabled={saving}
+              disabled={saving || deleteConfirmText !== "HAPUS"}
               className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
             >
               {saving ? "Menghapus..." : "Hapus"}
