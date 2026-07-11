@@ -115,10 +115,12 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [openCategoryModal, setOpenCategoryModal] = useState(false);
-  const [openDatePicker, setOpenDatePicker] = useState(false);
   const [openCreateDate, setOpenCreateDate] = useState(false);
   const [createDate, setCreateDate] = useState(todayISO());
   const [calView, setCalView] = useState(todayISO());
+  const [datePickerMode, setDatePickerMode] = useState<"create" | "form">(
+    "create",
+  );
   const [openTypePicker, setOpenTypePicker] = useState(false);
   const [openCategoryPicker, setOpenCategoryPicker] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -262,25 +264,38 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   }
 
   function openCreateDateModal() {
+    setDatePickerMode("create");
     const initDate = !viewAll ? defaultDateForMonth(selectedMonth) : todayISO();
     setCreateDate(initDate);
     setCalView(initDate);
     setOpenCreateDate(true);
   }
 
-  function confirmCreateDate() {
+  function openFormDateModal() {
+    setDatePickerMode("form");
+    setCreateDate(form.date || todayISO());
+    setCalView(form.date || todayISO());
+    setOpenCreateDate(true);
+  }
+
+  function confirmCreateDate(picked?: string) {
+    const date = picked ?? createDate;
+    if (datePickerMode === "form") {
+      setForm({ ...form, date });
+      setOpenCreateDate(false);
+      return;
+    }
     setOpenCreateDate(false);
     if (!viewAll) {
-      setSelectedMonth(monthKey(createDate));
+      setSelectedMonth(monthKey(date));
     }
-    resetForm(createDate);
+    resetForm(date);
     setOpen(true);
   }
 
   function closeModal() {
     setOpen(false);
     setOpenDeleteModal(false);
-    setOpenDatePicker(false);
     setOpenTypePicker(false);
     setOpenCategoryPicker(false);
     resetForm();
@@ -1315,7 +1330,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           <button
             type="button"
             aria-label="Tambah transaksi"
-            className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
+            className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
             onClick={openCreateDateModal}
           >
             <svg
@@ -1390,22 +1405,13 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
               <div className="mb-1 text-xs font-medium text-slate-600">
                 Tanggal
               </div>
-              <div className="md:hidden">
-                <button
-                  type="button"
-                  className="w-full rounded-lg border bg-white px-3 py-2 text-left text-sm font-medium text-slate-900"
-                  onClick={() => setOpenDatePicker(true)}
-                >
-                  {form.date || "Pilih tanggal"}
-                </button>
-              </div>
-              <div className="hidden md:block">
-                <Input
-                  type="date"
-                  value={form.date}
-                  onChange={(e) => setForm({ ...form, date: e.target.value })}
-                />
-              </div>
+              <button
+                type="button"
+                className="w-full rounded-lg border bg-white px-3 py-2 text-left text-sm font-medium text-slate-900"
+                onClick={openFormDateModal}
+              >
+                {form.date || "Pilih tanggal"}
+              </button>
             </div>
 
             <div className="md:col-span-2">
@@ -1789,7 +1795,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                   <button
                     key={iso}
                     type="button"
-                    onClick={() => setCreateDate(iso)}
+                    onClick={() => confirmCreateDate(iso)}
                     className={`grid h-10 place-items-center rounded-lg text-sm transition ${
                       isSelected
                         ? "bg-slate-900 text-white font-semibold"
@@ -1807,8 +1813,18 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           </div>
 
           <div className="flex items-center justify-between gap-2 border-t pt-2 dark:border-slate-700">
-            <div className="text-xs text-slate-500">
-              {formatDate(createDate)}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const today = todayISO();
+                  setCreateDate(today);
+                  setCalView(today);
+                }}
+              >
+                Hari ini
+              </Button>
+              <div className="text-xs text-slate-500">{formatDate(createDate)}</div>
             </div>
             <div className="flex justify-end gap-2">
               <Button
@@ -1817,30 +1833,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
               >
                 Batal
               </Button>
-              <Button onClick={confirmCreateDate}>Lanjut</Button>
+              <Button onClick={() => confirmCreateDate()}>Lanjut</Button>
             </div>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
-        open={openDatePicker}
-        title="Tanggal"
-        onClose={() => setOpenDatePicker(false)}
-      >
-        <div className="grid gap-3">
-          <Input
-            type="date"
-            value={form.date}
-            onChange={(e) => setForm({ ...form, date: e.target.value })}
-          />
-          <div className="flex justify-end gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => setOpenDatePicker(false)}
-            >
-              Tutup
-            </Button>
           </div>
         </div>
       </Modal>
