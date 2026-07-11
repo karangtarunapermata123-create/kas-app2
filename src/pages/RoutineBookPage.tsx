@@ -15,6 +15,7 @@ import {
   deleteRoutineCashEntry,
   deleteRoutineSession,
   deleteRoutineChecklist,
+  deleteRoutineChecklistsByPeriodKey,
   getBooks,
   getRoutineArisanEntries,
   getRoutineCashEntries,
@@ -726,6 +727,148 @@ export default function RoutineBookPage() {
     setEditingSessionId(null);
   }
 
+  // State untuk kolom arisan yang sedang aktif (menampilkan tombol hapus)
+  const [activeArisanColIdx, setActiveArisanColIdx] = useState<number | null>(null);
+  // Modal opsi kolom (ganti tanggal / hapus)
+  const [colOptionsModalOpen, setColOptionsModalOpen] = useState(false);
+  const [colOptionsIdx, setColOptionsIdx] = useState<number | null>(null);
+  // Modal konfirmasi hapus kolom yang punya data
+  const [confirmDeleteColIdx, setConfirmDeleteColIdx] = useState<number | null>(null);
+  // Kolom yang dipakai untuk sort baris (null = tidak sort)
+  const [sortByColIdx, setSortByColIdx] = useState<number | null>(null);
+  // Modal pilih tanggal untuk tambah / rename kolom
+  const [colDateModalOpen, setColDateModalOpen] = useState(false);
+  const [colDateModalTarget, setColDateModalTarget] = useState<"add" | number>("add"); // "add" = kolom baru, number = edit kolom idx
+  const [colDateInput, setColDateInput] = useState(""); // nilai date input
+
+  // Ref ke elemen tabel — untuk click-outside agar reset activeArisanColIdx
+  const arisanTableRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside: reset kolom aktif saat klik di luar tabel
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (activeArisanColIdx === null) return;
+      if (arisanTableRef.current && !arisanTableRef.current.contains(e.target as Node)) {
+        setActiveArisanColIdx(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [activeArisanColIdx]);
+
+  // Helper: ambil labels kolom dari session aktif
+  const arisanColumnLabels = useMemo<string[]>(() => {
+    if (!selectedSessionId) return [];
+    const session = sessions.find((s) => s.id === selectedSessionId);
+    return session?.columnLabels ?? [];
+  }, [sessions, selectedSessionId]);
+
+  // Helper: format tanggal ISO "yyyy-mm-dd" → 2 baris ["dd/mm", "yy"]
+  function formatColLabel(label: string): string {
+    if (!label) return "";
+    const d = new Date(label + "T00:00:00");
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = String(d.getFullYear());
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    return label;
+  }
+
+  function formatColLabelLines(label: string): [string, string] | null {
+    if (!label) return null;
+    const d = new Date(label + "T00:00:00");
+    if (!isNaN(d.getTime())) {
+      const dd = String(d.getDate()).padStart(2, "0");
+      const mm = String(d.getMonth() + 1).padStart(2, "0");
+      const yyyy = String(d.getFullYear());
+      return [`${dd}/${mm}`, yyyy];
+    }
+    return null;
+  }
+
+  // Simpan array labels ke session
+  async function saveColumnLabels(labels: string[]) {
+    if (!selectedSessionId) return;
+    await updateRoutineSession(safeBookId, selectedSessionId, { columnLabels: labels });
+    await refreshData();
+  }
+
+  // Buka modal tanggal untuk tambah kolom baru
+  function handleOpenAddColModal() {
+    setColDateModalTarget("add");
+    setColDateInput("");
+    setColDateModalOpen(true);
+  }
+
+  // Buka modal tanggal untuk rename kolom existing
+  function handleOpenRenameColModal(idx: number) {
+    setColDateModalTarget(idx);
+    setColDateInput(arisanColumnLabels[idx] ?? "");
+    setColDateModalOpen(true);
+    setActiveArisanColIdx(null);
+  }
+
+  // Konfirmasi dari modal date
+  async function handleColDateConfirm() {
+    if (colDateModalTarget === "add") {
+      // Tambah kolom baru
+      const newCount = periodCount + 1;
+      const newLabels = [...arisanColumnLabels, colDateInput];
+      await updateRoutineSession(safeBookId, selectedSessionId, {
+        columnCount: newCount,
+        columnLabels: newLabels,
+      });
+      await refreshData();
+    } else {
+      // Rename label kolom existing
+      const newLabels = [...arisanColumnLabels];
+      newLabels[colDateModalTarget] = colDateInput;
+      await saveColumnLabels(newLabels);
+    }
+    setColDateModalOpen(false);
+    setColDateInput("");
+  }
+
+  // Fungsi untuk tambah kolom arisan (buka modal tanggal)
+  async function handleAddArisanColumn() {
+    handleOpenAddColModal();
+  }
+
+  async function doRemoveArisanColumn(colIdx: number) {
+    if (!selectedSessionId) return;
+    if (periodCount <= 1) return;
+    const periodKey = getArisanPeriodKey(colIdx);
+    // Hapus semua checklist untuk kolom (period) ini
+    await deleteRoutineChecklistsByPeriodKey(safeBookId, periodKey);
+    const newCount = periodCount - 1;
+    // Hapus label pada index ini
+    const newLabels = arisanColumnLabels.filter((_, i) => i !== colIdx);
+    await updateRoutineSession(safeBookId, selectedSessionId, {
+      columnCount: newCount,
+      columnLabels: newLabels,
+    });
+    setActiveArisanColIdx(null);
+    setConfirmDeleteColIdx(null);
+    await refreshData();
+  }
+
+  async function handleRemoveArisanColumn(colIdx: number) {
+    if (!selectedSessionId) return;
+    if (periodCount <= 1) return;
+    const periodKey = getArisanPeriodKey(colIdx);
+    // Cek apakah ada data checklist di kolom ini
+    const hasData = checklists.some((c) => c.periodKey === periodKey);
+    if (hasData) {
+      // Tampilkan modal konfirmasi
+      setConfirmDeleteColIdx(colIdx);
+    } else {
+      // Langsung hapus tanpa konfirmasi
+      await doRemoveArisanColumn(colIdx);
+    }
+  }
+
   // Untuk arisan, gunakan members dan categories dari session yang dipilih
   // Untuk bulanan, gunakan members dan categories global
   const displayMembers = useMemo(() => {
@@ -762,7 +905,17 @@ export default function RoutineBookPage() {
     return true;
   };
 
-  const periodCount = frequency === "bulanan" ? 12 : displayMembers.length;
+  const periodCount = useMemo(() => {
+    if (frequency === "bulanan") return 12;
+    // Untuk arisan: gunakan columnCount dari session jika ada, fallback ke jumlah anggota
+    if (frequency === "arisan" && selectedSessionId) {
+      const session = sessions.find((s) => s.id === selectedSessionId);
+      if (session?.columnCount !== undefined && session.columnCount > 0) {
+        return session.columnCount;
+      }
+    }
+    return displayMembers.length || 1;
+  }, [frequency, selectedSessionId, sessions, displayMembers.length]);
 
   const totals = useMemo(() => {
     let total = 0;
@@ -1041,18 +1194,42 @@ export default function RoutineBookPage() {
     routineCashEntries,
   ]);
 
-  const visibleMembersWithCategories = useMemo(
-    () =>
-      displayMembers
-        .map((member) => ({
-          member,
-          categories: filteredCategories.filter((category) =>
-            memberSupportsCategory(member, category),
-          ),
-        }))
-        .filter((entry) => entry.categories.length > 0),
-    [displayMembers, filteredCategories, frequency],
-  );
+  const visibleMembersWithCategories = useMemo(() => {
+    const base = displayMembers
+      .map((member) => ({
+        member,
+        categories: filteredCategories.filter((category) =>
+          memberSupportsCategory(member, category),
+        ),
+      }))
+      .filter((entry) => entry.categories.length > 0);
+
+    // Sort berdasarkan status checklist kolom yang dipilih (arisan only)
+    if (frequency === "arisan" && sortByColIdx !== null) {
+      const periodKey = getArisanPeriodKey(sortByColIdx);
+      // Status per member: 0=kosong, 1=silang(notPaid), 2=centang
+      function memberStatus(memberId: string): number {
+        // Cek semua kategori member di kolom ini
+        const checks = filteredCategories
+          .map((cat) => getChecklistStatus(memberId, cat.id, periodKey))
+          .filter(Boolean);
+        if (checks.length === 0) return 0;
+        // Jika ada yang checked → cek apakah notPaid atau tidak
+        const anyChecked = checks.some((c) => c!.checked);
+        if (!anyChecked) return 0;
+        const anyNotPaid = checks.some((c) => c!.checked && c!.notPaid);
+        const anyPaid = checks.some((c) => c!.checked && !c!.notPaid);
+        if (anyPaid) return 2;
+        if (anyNotPaid) return 1;
+        return 0;
+      }
+      return [...base].sort(
+        (a, b) => memberStatus(a.member.id) - memberStatus(b.member.id),
+      );
+    }
+
+    return base;
+  }, [displayMembers, filteredCategories, frequency, sortByColIdx, checklists, selectedSessionId]);
 
   const years = useMemo(() => {
     const current = new Date().getFullYear();
@@ -1506,6 +1683,9 @@ export default function RoutineBookPage() {
           </div>
 
           <div
+            ref={arisanTableRef}
+          >
+          <div
             ref={tableWrapperRef}
             className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700"
             style={{ height: tableHeight }}
@@ -1547,17 +1727,61 @@ export default function RoutineBookPage() {
                         </th>
                       ))
                     : Array.from(
-                        { length: displayMembers.length },
-                        (_, idx) => (
-                          <th
-                            key={idx}
-                            className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-1 py-3 text-center"
-                            style={{ width: "48px" }}
-                          >
-                            {idx + 1}
-                          </th>
-                        ),
+                        { length: periodCount },
+                        (_, idx) => {
+                          const isActive = activeArisanColIdx === idx;
+                          const rawLabel = arisanColumnLabels[idx] ?? "";
+                          const displayLabel = rawLabel ? formatColLabel(rawLabel) : String(idx + 1);
+                          const labelLines = rawLabel ? formatColLabelLines(rawLabel) : null;
+                          const isSortActive = sortByColIdx === idx;
+                          return (
+                            <th
+                              key={idx}
+                              className={`sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-0 py-1 text-center select-none transition-colors ${
+                                isSortActive
+                                  ? "bg-emerald-50 dark:bg-emerald-900/20"
+                                  : userCanEdit ? "cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800" : ""
+                              }`}
+                              style={{ width: "52px" }}
+                              onClick={() => {
+                                if (!userCanEdit) return;
+                                setColOptionsIdx(idx);
+                                setColOptionsModalOpen(true);
+                                setActiveArisanColIdx(null);
+                              }}
+                              title={userCanEdit ? "Klik untuk opsi kolom" : undefined}
+                            >
+                              {labelLines ? (
+                                <span className="flex flex-col items-center leading-tight">
+                                  <span className="text-[11px] font-semibold">{labelLines[0]}</span>
+                                  <span className="text-[11px] font-semibold opacity-70">{labelLines[1]}</span>
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-semibold">{displayLabel}</span>
+                              )}
+                              {isSortActive && (
+                                <span className="block h-0.5 w-3 mx-auto mt-0.5 rounded bg-emerald-500" />
+                              )}
+                            </th>
+                          );
+                        },
                       )}
+                  {/* Kolom "+" untuk tambah kolom arisan */}
+                  {frequency === "arisan" && userCanEdit && (
+                    <th
+                      className="sticky top-0 z-10 border-b border-l border-r border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-1 py-1.5 text-center"
+                      style={{ width: "36px" }}
+                    >
+                      <button
+                        type="button"
+                        onClick={handleAddArisanColumn}
+                        title="Tambah kolom"
+                        className="flex h-5 w-5 mx-auto items-center justify-center rounded bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                      </button>
+                    </th>
+                  )}
                   <th
                     className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center"
                     style={{ width: "120px" }}
@@ -1712,7 +1936,7 @@ export default function RoutineBookPage() {
                                 );
                               })
                             : Array.from(
-                                { length: displayMembers.length },
+                                { length: periodCount },
                                 (_, pIdx) => {
                                   const periodKey = getArisanPeriodKey(pIdx);
                                   const checklist = getChecklistStatus(
@@ -1818,6 +2042,11 @@ export default function RoutineBookPage() {
                                 },
                               )}
 
+                          {/* td kosong untuk kolom "+" arisan */}
+                          {frequency === "arisan" && userCanEdit && (
+                            <td className="border-b border-l border-r border-dashed border-slate-300 dark:border-slate-600" />
+                          )}
+
                           <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center font-medium text-emerald-700 dark:text-emerald-400">
                             {categoryTotals.get(
                               `${member.id}:${category.id}`,
@@ -1851,12 +2080,17 @@ export default function RoutineBookPage() {
                       {t}x
                     </td>
                   ))}
+                  {/* td kosong untuk kolom "+" arisan di baris Total */}
+                  {frequency === "arisan" && userCanEdit && (
+                    <td className="border-l border-r border-t-2 border-dashed border-slate-300 dark:border-slate-600" />
+                  )}
                   <td className="border-t-2 border-slate-200 dark:border-slate-700 px-4 py-3 text-center text-emerald-700 dark:text-emerald-400">
                     {totals}x
                   </td>
                 </tr>
               </tbody>
             </table>
+          </div>
           </div>
         </div>
       )}
@@ -2609,7 +2843,7 @@ export default function RoutineBookPage() {
               {(frequency === "bulanan"
                 ? MONTH_NAMES
                 : Array.from(
-                    { length: displayMembers.length },
+                    { length: periodCount },
                     (_, i) => String(i + 1),
                   )
               ).map((periodName, periodIndex) => {
@@ -3331,6 +3565,148 @@ return (
         actionLabel="Lihat Transaksi"
         onAction={handleViewTransactions}
       />
+
+      {/* Modal opsi kolom arisan: ganti tanggal / hapus / urutkan */}
+      <Modal
+        open={colOptionsModalOpen}
+        title={`Kolom ${colOptionsIdx !== null ? (arisanColumnLabels[colOptionsIdx] ? formatColLabel(arisanColumnLabels[colOptionsIdx]) : colOptionsIdx + 1) : ""}`}
+        onClose={() => { setColOptionsModalOpen(false); }}
+      >
+        <div className="grid gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setColOptionsModalOpen(false);
+              if (colOptionsIdx !== null) handleOpenRenameColModal(colOptionsIdx);
+            }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+            </span>
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Ganti Tanggal</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Ubah label tanggal kolom ini</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setColOptionsModalOpen(false);
+              setSortByColIdx(sortByColIdx === colOptionsIdx ? null : colOptionsIdx);
+            }}
+            className={`flex items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors ${
+              sortByColIdx === colOptionsIdx
+                ? "border-emerald-300 bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900/20"
+                : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700"
+            }`}
+          >
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+              sortByColIdx === colOptionsIdx
+                ? "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300"
+                : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+            }`}>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 6h18"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>
+            </span>
+            <div>
+              <div className={`text-sm font-medium ${sortByColIdx === colOptionsIdx ? "text-emerald-700 dark:text-emerald-300" : "text-slate-900 dark:text-white"}`}>
+                {sortByColIdx === colOptionsIdx ? "Urutan Aktif ✓" : "Urutkan"}
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Kosong → Silang → Centang</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setColOptionsModalOpen(false);
+              setSortByColIdx(null);
+              if (colOptionsIdx !== null) handleRemoveArisanColumn(colOptionsIdx);
+            }}
+            className="flex items-center gap-3 rounded-xl border border-red-200 dark:border-red-900/40 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </span>
+            <div>
+              <div className="text-sm font-medium text-red-700 dark:text-red-400">Hapus Kolom</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Hapus kolom beserta datanya</div>
+            </div>
+          </button>
+        </div>
+      </Modal>
+
+      {/* Modal pilih tanggal untuk tambah / rename kolom arisan */}
+      <Modal
+        open={colDateModalOpen}
+        title={colDateModalTarget === "add" ? "Tanggal Kolom Baru" : `Ubah Tanggal Kolom ${typeof colDateModalTarget === "number" ? colDateModalTarget + 1 : ""}`}
+        onClose={() => setColDateModalOpen(false)}
+      >
+        <div className="grid gap-4">
+          <div className="grid gap-1.5">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">
+              Pilih tanggal
+            </label>
+            <input
+              type="date"
+              value={colDateInput}
+              onChange={(e) => setColDateInput(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-2 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              autoFocus
+            />
+            {colDateInput && (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Akan ditampilkan sebagai: <span className="font-semibold text-slate-700 dark:text-slate-300">{formatColLabel(colDateInput)}</span>
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setColDateModalOpen(false)}>
+              Batal
+            </Button>
+            <Button
+              onClick={handleColDateConfirm}
+              disabled={!colDateInput}
+            >
+              {colDateModalTarget === "add" ? "Tambah Kolom" : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal konfirmasi hapus kolom arisan yang punya data */}
+      <Modal
+        open={confirmDeleteColIdx !== null}
+        title="Hapus Kolom?"
+        onClose={() => setConfirmDeleteColIdx(null)}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Kolom <span className="font-semibold">{confirmDeleteColIdx !== null ? confirmDeleteColIdx + 1 : ""}</span> masih memiliki data setoran.
+            Menghapus kolom ini akan <span className="text-red-600 font-medium">menghapus semua data</span> pada kolom tersebut secara permanen.
+          </p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Yakin ingin melanjutkan?
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmDeleteColIdx(null)}
+            >
+              Batal
+            </Button>
+            <Button
+              className="bg-red-600 hover:bg-red-700 text-white border-red-600"
+              onClick={() => {
+                if (confirmDeleteColIdx !== null) {
+                  doRemoveArisanColumn(confirmDeleteColIdx);
+                }
+              }}
+            >
+              Hapus Kolom
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

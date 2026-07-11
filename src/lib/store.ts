@@ -1046,6 +1046,19 @@ export async function deleteRoutineChecklist(
   dispatchRoutineChanged(bookId);
 }
 
+export async function deleteRoutineChecklistsByPeriodKey(
+  bookId: string,
+  periodKey: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("routine_checklists")
+    .delete()
+    .eq("book_id", bookId)
+    .eq("period_key", periodKey);
+  if (error) throw error;
+  dispatchRoutineChanged(bookId);
+}
+
 export async function transferRoutineToTransaction(
   routineBookId: string,
   periodKey: string,
@@ -1221,6 +1234,8 @@ export async function getRoutineSessions(
         name: s.name,
         members: s.members ? JSON.parse(s.members) : undefined,
         categories: s.categories ? JSON.parse(s.categories) : undefined,
+        columnCount: s.column_count ?? undefined,
+        columnLabels: s.column_labels ? JSON.parse(s.column_labels) : undefined,
       };
     } catch (e) {
       console.error("Error parsing session data:", e);
@@ -1229,6 +1244,8 @@ export async function getRoutineSessions(
         name: s.name,
         members: undefined,
         categories: undefined,
+        columnCount: undefined,
+        columnLabels: undefined,
       };
     }
   });
@@ -1295,6 +1312,8 @@ export async function updateRoutineSession(
     name?: string;
     members?: RoutineMember[];
     categories?: RoutineCategory[];
+    columnCount?: number;
+    columnLabels?: string[];
   },
 ): Promise<void> {
   const updateData: any = {};
@@ -1303,13 +1322,33 @@ export async function updateRoutineSession(
     updateData.members = JSON.stringify(updates.members);
   if (updates.categories !== undefined)
     updateData.categories = JSON.stringify(updates.categories);
+  if (updates.columnCount !== undefined)
+    updateData.column_count = updates.columnCount;
+  if (updates.columnLabels !== undefined)
+    updateData.column_labels = JSON.stringify(updates.columnLabels);
 
   const { error } = await supabase
     .from("routine_sessions")
     .update(updateData)
     .eq("id", sessionId)
     .eq("book_id", bookId);
-  if (error) throw error;
+  // If column_labels column doesn't exist yet, retry without it
+  if (error) {
+    const msg = (error as any)?.message ?? "";
+    if (msg.includes("column_labels") || msg.includes("column") || msg.includes("does not exist")) {
+      delete updateData.column_labels;
+      if (Object.keys(updateData).length > 0) {
+        const { error: e2 } = await supabase
+          .from("routine_sessions")
+          .update(updateData)
+          .eq("id", sessionId)
+          .eq("book_id", bookId);
+        if (e2) throw e2;
+      }
+    } else {
+      throw error;
+    }
+  }
 }
 
 export async function deleteRoutineSession(

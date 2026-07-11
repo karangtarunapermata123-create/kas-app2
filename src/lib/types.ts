@@ -112,6 +112,8 @@ export type RoutineSession = {
   name: string;
   members?: RoutineMember[]; // anggota khusus untuk sesi ini (hanya untuk arisan)
   categories?: RoutineCategory[]; // kategori khusus untuk sesi ini (hanya untuk arisan)
+  columnCount?: number; // jumlah kolom tabel arisan (custom oleh user)
+  columnLabels?: string[]; // label header tiap kolom arisan (misal tanggal)
 };
 
 export type RoutineFrequency = "bulanan" | "arisan";
