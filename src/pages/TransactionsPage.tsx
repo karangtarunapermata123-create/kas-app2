@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import ExcelJS from "exceljs";
 import Button from "../components/Button";
@@ -6,7 +6,7 @@ import Input from "../components/Input";
 import Modal from "../components/Modal";
 import Select from "../components/Select";
 import SuccessModal from "../components/SuccessModal";
-import { monthKey, monthLabel, todayISO } from "../lib/date";
+import { monthKey, monthLabel, todayISO, formatDate } from "../lib/date";
 import { formatIDR, toNumberSafe } from "../lib/money";
 import { useAuth, canEditBook } from "../lib/auth";
 import {
@@ -116,12 +116,19 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [openCategoryModal, setOpenCategoryModal] = useState(false);
   const [openDatePicker, setOpenDatePicker] = useState(false);
+  const [openCreateDate, setOpenCreateDate] = useState(false);
+  const [createDate, setCreateDate] = useState(todayISO());
+  const [calView, setCalView] = useState(todayISO());
   const [openTypePicker, setOpenTypePicker] = useState(false);
   const [openCategoryPicker, setOpenCategoryPicker] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  // Mode "lihat semua" dengan pagination
+  const [viewAll, setViewAll] = useState(true);
+  const [allPage, setAllPage] = useState(0);
+  const ALL_PAGE_SIZE = 15;
 
   // State untuk reverse transfer
   const [openReverseModal, setOpenReverseModal] = useState(false);
@@ -161,7 +168,12 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   }, [profile, bookId]);
 
   useEffect(() => {
-    getTransactions(bookId).then(setTransactions);
+    getTransactions(bookId).then((txs) => {
+      setTransactions(txs);
+      // Default ke halaman terakhir (terbaru di bawah) saat pertama load
+      const total = txs.length;
+      setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+    });
 
     const onTransactionsChanged = (event: Event) => {
       const detail = (event as CustomEvent<{ bookId?: string }>).detail;
@@ -214,9 +226,11 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       const query = searchQuery.toLowerCase().trim();
       return transactions.filter((t) => t.note.toLowerCase().includes(query));
     }
+    // Jika mode "lihat semua", tidak difilter bulan
+    if (viewAll) return transactions;
     // Jika tidak, filter berdasarkan bulan yang dipilih
     return transactions.filter((t) => monthKey(t.date) === selectedMonth);
-  }, [transactions, selectedMonth, isSearchMode, searchQuery]);
+  }, [transactions, selectedMonth, isSearchMode, searchQuery, viewAll]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<string>();
@@ -228,10 +242,10 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     return [...years].sort((a, b) => Number(a) - Number(b));
   }, [transactions]);
 
-  function resetForm() {
+  function resetForm(initialDate?: string) {
     setEditingId(null);
     setForm({
-      date: defaultDateForMonth(selectedMonth),
+      date: initialDate ?? defaultDateForMonth(selectedMonth),
       type: "masuk",
       categoryId: categories[0]?.id ?? "lainnya",
       amount: "",
@@ -244,6 +258,22 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
 
   function openCreate() {
     resetForm();
+    setOpen(true);
+  }
+
+  function openCreateDateModal() {
+    const initDate = !viewAll ? defaultDateForMonth(selectedMonth) : todayISO();
+    setCreateDate(initDate);
+    setCalView(initDate);
+    setOpenCreateDate(true);
+  }
+
+  function confirmCreateDate() {
+    setOpenCreateDate(false);
+    if (!viewAll) {
+      setSelectedMonth(monthKey(createDate));
+    }
+    resetForm(createDate);
     setOpen(true);
   }
 
@@ -273,6 +303,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       setSortKey(key);
       setSortDir("asc");
     }
+    setAllPage(0);
   }
 
   function sortIcon(key: SortKey) {
@@ -780,18 +811,25 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
         return sortDir === "asc" ? cmp : -cmp;
       });
     }
+    // Pagination saat viewAll — urutan ascending (terlama atas, terbaru bawah)
+    if (viewAll && !isSearchMode) {
+      const ascending = [...list].reverse();
+      return ascending.slice(allPage * ALL_PAGE_SIZE, (allPage + 1) * ALL_PAGE_SIZE);
+    }
     return list;
-  }, [filtered, mode, sortKey, sortDir, categories]);
+  }, [filtered, mode, sortKey, sortDir, categories, viewAll, allPage, isSearchMode]);
 
   const totals = useMemo(() => {
+    // Hitung total dari semua filtered (bukan hanya halaman ini)
+    const source = (mode === "rekening" ? filtered.filter((t) => t.masukKeRekening) : filtered);
     let masuk = 0;
     let keluar = 0;
-    for (const t of displayed) {
+    for (const t of source) {
       if (t.type === "masuk") masuk += t.amount;
       else keluar += t.amount;
     }
     return { masuk, keluar, saldo: masuk - keluar };
-  }, [displayed]);
+  }, [filtered, mode]);
 
   return (
     <div className="relative min-w-0">
@@ -877,66 +915,107 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
         </div>
       )}
 
-      {/* Month Navigation - Hidden when searching */}
+      {/* Tab Semua / Per Bulan - Hidden when searching */}
       {!isSearchMode && (
-        <div className="mb-3 grid grid-cols-[1fr_auto_1fr] items-center gap-2">
-          <div className="justify-self-start">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectedMonth(prevMonth(selectedMonth));
-                setOpenMonthModal(false);
-              }}
-              aria-label="Bulan lalu"
-              className="min-w-11 px-4"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-                aria-hidden="true"
-              >
-                <path d="m15 18-6-6 6-6" />
-              </svg>
-            </Button>
-          </div>
-          <div className="justify-self-center">
+        <div className="mb-3 flex flex-col gap-2">
+          {/* 2 Tab */}
+          <div className="flex rounded-lg border dark:border-slate-700 overflow-hidden w-fit">
             <button
               type="button"
-              className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
-              onClick={openMonthSelectModal}
+              onClick={() => {
+                setViewAll(true);
+                const total = (mode === "rekening"
+                  ? transactions.filter((t) => t.masukKeRekening)
+                  : transactions).length;
+                setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+              }}
+              className={`px-4 py-1.5 text-sm font-medium transition ${
+                viewAll
+                  ? "bg-slate-900 dark:bg-slate-700 text-white"
+                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              }`}
             >
-              {monthLabel(selectedMonth)}
+              Semua
+            </button>
+            <button
+              type="button"
+              onClick={() => { setViewAll(false); }}
+              className={`px-4 py-1.5 text-sm font-medium transition border-l dark:border-slate-700 ${
+                !viewAll
+                  ? "bg-slate-900 dark:bg-slate-700 text-white"
+                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              }`}
+            >
+              Per Bulan
             </button>
           </div>
-          <div className="justify-self-end">
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setSelectedMonth(nextMonth(selectedMonth));
-                setOpenMonthModal(false);
-              }}
-              aria-label="Bulan depan"
-              className="min-w-11 px-4"
-            >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-                aria-hidden="true"
-              >
-                <path d="m9 18 6-6-6-6" />
-              </svg>
-            </Button>
-          </div>
+
+          {/* Navigasi bulan — hanya tampil saat tab Per Bulan */}
+          {!viewAll && (
+            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+              <div className="justify-self-start">
+                <Button
+                  variant="secondary"
+                  onClick={() => { setSelectedMonth(prevMonth(selectedMonth)); setOpenMonthModal(false); }}
+                  aria-label="Bulan lalu"
+                  className="min-w-11 px-4"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </Button>
+              </div>
+              <div className="justify-self-center">
+                <button type="button" className="rounded-lg border bg-white px-3 py-2 text-sm font-medium text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white" onClick={openMonthSelectModal}>
+                  {monthLabel(selectedMonth)}
+                </button>
+              </div>
+              <div className="justify-self-end">
+                <Button
+                  variant="secondary"
+                  onClick={() => { setSelectedMonth(nextMonth(selectedMonth)); setOpenMonthModal(false); }}
+                  aria-label="Bulan depan"
+                  className="min-w-11 px-4"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Pagination — hanya tampil saat tab Semua */}
+          {viewAll && (() => {
+            const totalItems = (mode === "rekening"
+              ? filtered.filter((t) => t.masukKeRekening)
+              : filtered
+            ).length;
+            const totalPages = Math.ceil(totalItems / ALL_PAGE_SIZE) || 1;
+            return (
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  disabled={allPage === 0}
+                  onClick={() => setAllPage((p) => p - 1)}
+                  className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                >
+                  ← Sebelumnya
+                </button>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {allPage + 1} / {totalPages}
+                </span>
+                <button
+                  type="button"
+                  disabled={allPage >= totalPages - 1}
+                  onClick={() => setAllPage((p) => p + 1)}
+                  className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                >
+                  Selanjutnya →
+                </button>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -997,7 +1076,22 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                     onClick={() => openInfoModal(t)}
                   >
                     <td className="py-3 pl-4 pr-3 whitespace-nowrap">
-                      {isSearchMode ? t.date : t.date.slice(8, 10)}
+                      {isSearchMode ? (
+                        t.date
+                      ) : viewAll ? (
+                        /* Format ringkas: hari besar, bulan/tahun kecil dengan separator slash */
+                        <div className="flex items-baseline gap-0 leading-none">
+                          <span className="text-sm font-semibold tabular-nums">
+                            {String(Number(t.date.slice(8, 10)))}
+                          </span>
+                          <span className="text-slate-900 dark:text-white font-light text-base select-none">/</span>
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 tabular-nums">
+                            {String(Number(t.date.slice(5, 7)))}/{t.date.slice(2, 4)}
+                          </span>
+                        </div>
+                      ) : (
+                        t.date.slice(8, 10)
+                      )}
                     </td>
                     <td className="py-3 pr-3 whitespace-nowrap">
                       {catById(t.categoryId)}
@@ -1071,6 +1165,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           </div>
         )}
       </div>
+
+      {/* Pagination controls — hanya tampil saat viewAll */}
 
       <Modal open={openInfo} title="Info Transaksi" onClose={closeInfoModal}>
         {infoTx ? (
@@ -1220,7 +1316,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
             type="button"
             aria-label="Tambah transaksi"
             className="fixed bottom-[calc(6rem+env(safe-area-inset-bottom))] right-6 z-40 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
-            onClick={openCreate}
+            onClick={openCreateDateModal}
           >
             <svg
               viewBox="0 0 24 24"
@@ -1618,6 +1714,111 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                   ? "Simpan"
                   : "Tambah"}
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={openCreateDate}
+        title="Pilih Tanggal Transaksi"
+        onClose={() => setOpenCreateDate(false)}
+      >
+        <div className="grid gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              variant="secondary"
+              aria-label="Bulan lalu"
+              className="min-w-11 px-4"
+              onClick={() => {
+                const d = new Date(calView + "T00:00:00");
+                d.setMonth(d.getMonth() - 1);
+                setCalView(
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-15`,
+                );
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
+            </Button>
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+              {monthLabel(calView.slice(0, 7))}
+            </div>
+            <Button
+              variant="secondary"
+              aria-label="Bulan depan"
+              className="min-w-11 px-4"
+              onClick={() => {
+                const d = new Date(calView + "T00:00:00");
+                d.setMonth(d.getMonth() + 1);
+                setCalView(
+                  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-15`,
+                );
+              }}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-slate-500">
+            {["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"].map((d) => (
+              <div key={d} className="py-1">
+                {d}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-1">
+            {(() => {
+              const view = new Date(calView + "T00:00:00");
+              const year = view.getFullYear();
+              const month = view.getMonth();
+              const firstDay = new Date(year, month, 1).getDay();
+              const daysInMonth = new Date(year, month + 1, 0).getDate();
+              const cells: ReactNode[] = [];
+              for (let i = 0; i < firstDay; i += 1) {
+                cells.push(<div key={`blank-${i}`} />);
+              }
+              for (let day = 1; day <= daysInMonth; day += 1) {
+                const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                const isSelected = iso === createDate;
+                const isToday = iso === todayISO();
+                cells.push(
+                  <button
+                    key={iso}
+                    type="button"
+                    onClick={() => setCreateDate(iso)}
+                    className={`grid h-10 place-items-center rounded-lg text-sm transition ${
+                      isSelected
+                        ? "bg-slate-900 text-white font-semibold"
+                        : isToday
+                          ? "bg-slate-100 text-slate-900 font-semibold dark:bg-slate-700 dark:text-white"
+                          : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700"
+                    }`}
+                  >
+                    {day}
+                  </button>,
+                );
+              }
+              return cells;
+            })()}
+          </div>
+
+          <div className="flex items-center justify-between gap-2 border-t pt-2 dark:border-slate-700">
+            <div className="text-xs text-slate-500">
+              {formatDate(createDate)}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => setOpenCreateDate(false)}
+              >
+                Batal
+              </Button>
+              <Button onClick={confirmCreateDate}>Lanjut</Button>
+            </div>
           </div>
         </div>
       </Modal>
