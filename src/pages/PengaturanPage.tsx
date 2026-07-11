@@ -7,11 +7,13 @@ import { useAuth, canManageUsers } from '../lib/auth'
 import { useTheme } from '../lib/theme'
 import { getAllProfiles, ROLE_LABELS, ROLE_TEXT_COLORS } from '../lib/users'
 import type { Profile } from '../lib/auth'
+import { usePWAInstall } from '../lib/usePWAInstall'
 
 export default function PengaturanPage() {
   const navigate = useNavigate()
   const { profile: currentProfile } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { canInstall, isInstalled, triggerInstall } = usePWAInstall()
   const isSuperAdmin = currentProfile?.role === 'super_admin'
   const canManage = canManageUsers(currentProfile?.role)
 
@@ -34,6 +36,39 @@ export default function PengaturanPage() {
 
   return (
     <div className="grid gap-4">
+      {/* Card Install Aplikasi — muncul jika belum terinstall */}
+      {!isInstalled && (
+        <Card title="Aplikasi">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Install Aplikasi Ini</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {canInstall
+                  ? "Pasang sebagai aplikasi di perangkat Anda untuk akses lebih cepat"
+                  : "Buka menu browser (⋮) lalu pilih \"Tambahkan ke layar utama\""}
+              </div>
+            </div>
+            {canInstall ? (
+              <Button onClick={triggerInstall} className="shrink-0">
+                <span className="flex items-center gap-1.5">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                    <path d="M12 16v-8"/><path d="m8 12 4 4 4-4"/>
+                    <path d="M20 19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1"/>
+                  </svg>
+                  Install
+                </span>
+              </Button>
+            ) : (
+              <div className="shrink-0 flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-400">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                  <rect x="5" y="2" width="14" height="20" rx="2"/><path d="M12 18h.01"/>
+                </svg>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+
       <Card title="Tampilan">
         <div className="flex items-center justify-between">
           <div>

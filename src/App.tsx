@@ -20,7 +20,6 @@ import BookGroupPage from "./pages/BookGroupPage";
 import RequireAuth from "./components/RequireAuth";
 import { getActivities, getBooks, getSessionsByActivity } from "./lib/store";
 import { useAuth } from "./lib/auth";
-import { usePWAInstall } from "./lib/usePWAInstall";
 
 const linkBase =
   "flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium";
@@ -137,7 +136,6 @@ function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const { profile, signOut: _signOut } = useAuth();
-  const { canInstall, triggerInstall } = usePWAInstall();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [headerTitle, setHeaderTitle] = useState("Karang Taruna Permata");
   const [headerBackTo, setHeaderBackTo] = useState<string | undefined>(
@@ -371,19 +369,6 @@ function AppShell() {
                     Kembali
                   </button>
                 ) : null}
-                {canInstall && (
-                  <button
-                    type="button"
-                    onClick={triggerInstall}
-                    title="Install aplikasi"
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg border dark:border-slate-700 bg-emerald-600 text-white hover:bg-emerald-700 transition"
-                  >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                      <path d="M12 16v-8" /><path d="m8 12 4 4 4-4" />
-                      <path d="M20 19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1" />
-                    </svg>
-                  </button>
-                )}
                 <button
                   type="button"
                   title={path === "/pengaturan" ? "Kembali" : "Pengaturan"}
@@ -419,19 +404,6 @@ function AppShell() {
                   Kembali
                 </button>
               ) : null}
-              {canInstall && (
-                <button
-                  type="button"
-                  onClick={triggerInstall}
-                  className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-sm font-medium transition"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M12 16v-8" /><path d="m8 12 4 4 4-4" />
-                    <path d="M20 19a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-1" />
-                  </svg>
-                  Install Aplikasi
-                </button>
-              )}
             </div>
           </header>
 
