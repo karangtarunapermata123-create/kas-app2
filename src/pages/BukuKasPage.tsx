@@ -118,6 +118,8 @@ export default function BukuKasPage() {
   // State untuk modal alert
   const [openAlertModal, setOpenAlertModal] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
+  // State untuk expand/collapse group di modal kelola buku
+  const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
 
   function showAlert(message: string) {
     setAlertMessage(message);
@@ -993,24 +995,82 @@ export default function BukuKasPage() {
       >
         <div className="grid gap-4">
           <div className="grid gap-2">
-            {books.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2"
-              >
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium text-slate-900">
-                    {b.name}
+            {books.filter((b) => !b.groupId).map((b) => {
+              const isGroup = b.type === "group";
+              const groupMembers = isGroup ? books.filter((m) => m.groupId === b.id) : [];
+              const isExpanded = expandedGroupIds.has(b.id);
+
+              return (
+                <div key={b.id}>
+                  <div
+                    className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${isGroup ? "cursor-pointer select-none hover:bg-slate-50 dark:hover:bg-slate-700/50" : ""}`}
+                    onClick={isGroup ? () => setExpandedGroupIds((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(b.id)) next.delete(b.id); else next.add(b.id);
+                      return next;
+                    }) : undefined}
+                  >
+                    <div className="min-w-0 flex items-center gap-2">
+                      {isGroup && (
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 ${isExpanded ? "rotate-90" : ""}`}
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                      )}
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                          {b.name}
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          {getBookTypeLabel(b)}
+                        </div>
+                      </div>
+                    </div>
+                    <Button variant="secondary" onClick={(e) => { e.stopPropagation(); startEditBook(b.id); }}>
+                      Edit
+                    </Button>
                   </div>
-                  <div className="text-xs text-slate-500">
-                    {getBookTypeLabel(b)}
-                  </div>
+
+                  {/* Anggota group yang expand */}
+                  {isGroup && isExpanded && groupMembers.length > 0 && (
+                    <div className="ml-4 mt-1 grid gap-1 border-l-2 border-slate-200 dark:border-slate-700 pl-3">
+                      {groupMembers.map((member) => (
+                        <div
+                          key={member.id}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
+                              {member.name}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              {getBookTypeLabel(member)}
+                            </div>
+                          </div>
+                          <Button variant="secondary" onClick={() => startEditBook(member.id)}>
+                            Edit
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {isGroup && isExpanded && groupMembers.length === 0 && (
+                    <div className="ml-4 mt-1 border-l-2 border-slate-200 dark:border-slate-700 pl-3">
+                      <div className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-3 py-2 text-xs text-slate-400">
+                        Belum ada buku kas dalam group ini.
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <Button variant="secondary" onClick={() => startEditBook(b.id)}>
-                  Edit
-                </Button>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="flex justify-end">

@@ -4,7 +4,7 @@ import Card from '../components/Card'
 import Button from '../components/Button'
 import Select from '../components/Select'
 import Modal from '../components/Modal'
-import { monthKey, monthLabel, todayISO } from '../lib/date'
+import { monthKey } from '../lib/date'
 import { formatIDR } from '../lib/money'
 import { getTransactions } from '../lib/store'
 import type { Transaction } from '../lib/types'
@@ -90,6 +90,12 @@ export default function ReportsPage({ bookId }: Props) {
     setSelectedYear((prev) => prev + 1)
   }
 
+  function shortMonthLabel(key: string): string {
+    const [y, m] = key.split('-').map(Number)
+    const d = new Date(y, m - 1, 1)
+    return new Intl.DateTimeFormat('id-ID', { month: 'short' }).format(d)
+  }
+
   function goToMonthTransactions(monthKey: string) {
     // Navigate to transactions page with month parameter
     // We'll use URL state to pass the selected month
@@ -153,38 +159,41 @@ export default function ReportsPage({ bookId }: Props) {
         </div>
       </div>
 
-      <Card title={`Laporan Tahunan ${selectedYear}`}>
+      <Card title="Laporan Tahunan" noPadding>
         {rows.length === 0 ? (
-          <div className="text-sm text-slate-600">Belum ada data.</div>
+          <div className="px-4 py-4 text-sm text-slate-600">Belum ada data.</div>
         ) : (
-          <div className="w-full min-w-0 overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div
+            className="overflow-x-auto"
+            style={{ WebkitOverflowScrolling: 'touch' }}
+          >
+            <table className="w-full text-left text-sm text-slate-900 dark:text-slate-100" style={{ minWidth: '360px' }}>
               <thead className="text-xs uppercase text-slate-500">
                 <tr>
-                  <th className="py-2 pr-3 whitespace-nowrap">Bulan</th>
-                  <th className="py-2 pr-3 text-right whitespace-nowrap">Masuk</th>
-                  <th className="py-2 pr-3 text-right whitespace-nowrap">Keluar</th>
-                  <th className="py-2 pr-3 text-right whitespace-nowrap">Saldo</th>
+                  <th className="py-3 pl-4 pr-4 whitespace-nowrap">Bulan</th>
+                  <th className="py-3 pr-4 whitespace-nowrap">Masuk</th>
+                  <th className="py-3 pr-4 whitespace-nowrap">Keluar</th>
+                  <th className="py-3 pr-4 whitespace-nowrap">Saldo</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
                   <tr 
                     key={r.month} 
-                    className="border-t cursor-pointer hover:bg-slate-50 transition"
+                    className="border-t border-slate-100 dark:border-slate-700 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
                     onClick={() => goToMonthTransactions(r.month)}
                   >
-                    <td className="py-2 pr-3 whitespace-nowrap">{monthLabel(r.month)}</td>
-                    <td className="py-2 pr-3 text-right text-emerald-700">{formatIDR(r.masuk)}</td>
-                    <td className="py-2 pr-3 text-right text-rose-700">{formatIDR(r.keluar)}</td>
-                    <td className="py-2 pr-3 text-right font-medium">{formatIDR(r.saldo)}</td>
+                    <td className="py-2 pl-4 pr-4 whitespace-nowrap">{shortMonthLabel(r.month)}</td>
+                    <td className="py-2 pr-4 text-emerald-700 dark:text-emerald-400 whitespace-nowrap">{formatIDR(r.masuk)}</td>
+                    <td className="py-2 pr-4 text-rose-700 dark:text-rose-400 whitespace-nowrap">{formatIDR(r.keluar)}</td>
+                    <td className="py-2 pr-4 font-medium whitespace-nowrap">{formatIDR(r.saldo)}</td>
                   </tr>
                 ))}
-                <tr className="border-t-2 border-slate-300 font-semibold">
-                  <td className="py-2 pr-3 whitespace-nowrap">Total</td>
-                  <td className="py-2 pr-3 text-right text-emerald-700">{formatIDR(total.masuk)}</td>
-                  <td className="py-2 pr-3 text-right text-rose-700">{formatIDR(total.keluar)}</td>
-                  <td className="py-2 pr-3 text-right">{formatIDR(total.saldo)}</td>
+                <tr className="border-t-2 border-slate-300 dark:border-slate-600 font-semibold">
+                  <td className="py-2 pl-4 pr-4 whitespace-nowrap">Total</td>
+                  <td className="py-2 pr-4 text-emerald-700 dark:text-emerald-400 whitespace-nowrap">{formatIDR(total.masuk)}</td>
+                  <td className="py-2 pr-4 text-rose-700 dark:text-rose-400 whitespace-nowrap">{formatIDR(total.keluar)}</td>
+                  <td className="py-2 pr-4 whitespace-nowrap">{formatIDR(total.saldo)}</td>
                 </tr>
               </tbody>
             </table>

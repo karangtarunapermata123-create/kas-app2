@@ -128,7 +128,10 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const [isSearchMode, setIsSearchMode] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   // Mode "lihat semua" dengan pagination
-  const [viewAll, setViewAll] = useState(true);
+  const [viewAll, setViewAll] = useState(() => {
+    const state = location.state as { selectedMonth?: string } | null;
+    return !state?.selectedMonth; // false jika ada selectedMonth dari navigasi
+  });
   const [allPage, setAllPage] = useState(0);
   const ALL_PAGE_SIZE = 15;
 

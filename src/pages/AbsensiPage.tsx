@@ -1260,17 +1260,26 @@ export default function AbsensiPage() {
                             const stats = sessionStats[session.id];
                             const hadir = stats?.hadir ?? 0;
                             const total = stats?.total ?? 0;
+                            // Format tanggal sesi jadi 2 baris: dd/mm dan yyyy
+                            const d = session.date ? new Date(session.date + "T00:00:00") : null;
+                            const dateLines: [string, string] | null =
+                              d && !isNaN(d.getTime())
+                                ? [
+                                    `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`,
+                                    String(d.getFullYear()),
+                                  ]
+                                : null;
                             return (
                               <th
                                 key={session.id}
-                                className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-2 py-2 text-center font-semibold"
+                                className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-1 py-1 text-center font-semibold"
                                 style={{ width: "56px" }}
                               >
                                 <div className="flex flex-col items-center">
                                   <button
                                     id={`session-btn-${session.id}`}
                                     type="button"
-                                    className="text-sm hover:text-slate-900 dark:hover:text-white transition font-bold"
+                                    className="flex flex-col items-center leading-tight hover:text-slate-900 dark:hover:text-white transition"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       if (openTooltipSessionId === session.id) {
@@ -1310,7 +1319,14 @@ export default function AbsensiPage() {
                                       }
                                     }}
                                   >
-                                    {index + 1}
+                                    {dateLines ? (
+                                      <>
+                                        <span className="text-[11px] font-semibold">{dateLines[0]}</span>
+                                        <span className="text-[11px] font-semibold opacity-70">{dateLines[1]}</span>
+                                      </>
+                                    ) : (
+                                      <span className="text-[11px] font-semibold">{index + 1}</span>
+                                    )}
                                   </button>
                                 </div>
                               </th>

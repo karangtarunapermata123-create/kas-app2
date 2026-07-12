@@ -738,8 +738,9 @@ export default function RoutineBookPage() {
   const [sortByColIdx, setSortByColIdx] = useState<number | null>(null);
   // Modal pilih tanggal untuk tambah / rename kolom
   const [colDateModalOpen, setColDateModalOpen] = useState(false);
-  const [colDateModalTarget, setColDateModalTarget] = useState<"add" | number>("add"); // "add" = kolom baru, number = edit kolom idx
+  const [colDateModalTarget, setColDateModalTarget] = useState<"add" | "insert" | number>("add"); // "add" = kolom baru, "insert" = sisip setelah kolom tertentu, number = edit kolom idx
   const [colDateInput, setColDateInput] = useState(""); // nilai date input
+  const [colInsertAfterIdx, setColInsertAfterIdx] = useState<number | null>(null); // index untuk menyisip kolom baru setelah kolom ini
 
   // Ref ke elemen tabel — untuk click-outside agar reset activeArisanColIdx
   const arisanTableRef = useRef<HTMLDivElement>(null);
@@ -813,7 +814,7 @@ export default function RoutineBookPage() {
   // Konfirmasi dari modal date
   async function handleColDateConfirm() {
     if (colDateModalTarget === "add") {
-      // Tambah kolom baru
+      // Tambah kolom baru di akhir
       const newCount = periodCount + 1;
       const newLabels = [...arisanColumnLabels, colDateInput];
       await updateRoutineSession(safeBookId, selectedSessionId, {
@@ -821,7 +822,18 @@ export default function RoutineBookPage() {
         columnLabels: newLabels,
       });
       await refreshData();
-    } else {
+    } else if (colDateModalTarget === "insert" && colInsertAfterIdx !== null) {
+      // Sisip kolom baru setelah colInsertAfterIdx
+      const insertAt = colInsertAfterIdx + 1;
+      const newLabels = [...arisanColumnLabels];
+      newLabels.splice(insertAt, 0, colDateInput);
+      const newCount = periodCount + 1;
+      await updateRoutineSession(safeBookId, selectedSessionId, {
+        columnCount: newCount,
+        columnLabels: newLabels,
+      });
+      await refreshData();
+    } else if (typeof colDateModalTarget === "number") {
       // Rename label kolom existing
       const newLabels = [...arisanColumnLabels];
       newLabels[colDateModalTarget] = colDateInput;
@@ -829,6 +841,7 @@ export default function RoutineBookPage() {
     }
     setColDateModalOpen(false);
     setColDateInput("");
+    setColInsertAfterIdx(null);
   }
 
   // Fungsi untuk tambah kolom arisan (buka modal tanggal)
@@ -1766,22 +1779,7 @@ export default function RoutineBookPage() {
                           );
                         },
                       )}
-                  {/* Kolom "+" untuk tambah kolom arisan */}
-                  {frequency === "arisan" && userCanEdit && (
-                    <th
-                      className="sticky top-0 z-10 border-b border-l border-r border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900 px-1 py-1.5 text-center"
-                      style={{ width: "36px" }}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleAddArisanColumn}
-                        title="Tambah kolom"
-                        className="flex h-5 w-5 mx-auto items-center justify-center rounded bg-emerald-500 text-white hover:bg-emerald-600 transition-colors"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                      </button>
-                    </th>
-                  )}
+                  {/* Tambah kolom: pindah ke modal klik header kolom */}
                   <th
                     className="sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-center"
                     style={{ width: "120px" }}
@@ -2042,10 +2040,6 @@ export default function RoutineBookPage() {
                                 },
                               )}
 
-                          {/* td kosong untuk kolom "+" arisan */}
-                          {frequency === "arisan" && userCanEdit && (
-                            <td className="border-b border-l border-r border-dashed border-slate-300 dark:border-slate-600" />
-                          )}
 
                           <td className="border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-center font-medium text-emerald-700 dark:text-emerald-400">
                             {categoryTotals.get(
@@ -2080,10 +2074,6 @@ export default function RoutineBookPage() {
                       {t}x
                     </td>
                   ))}
-                  {/* td kosong untuk kolom "+" arisan di baris Total */}
-                  {frequency === "arisan" && userCanEdit && (
-                    <td className="border-l border-r border-t-2 border-dashed border-slate-300 dark:border-slate-600" />
-                  )}
                   <td className="border-t-2 border-slate-200 dark:border-slate-700 px-4 py-3 text-center text-emerald-700 dark:text-emerald-400">
                     {totals}x
                   </td>
@@ -3573,6 +3563,27 @@ return (
         onClose={() => { setColOptionsModalOpen(false); }}
       >
         <div className="grid gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setColOptionsModalOpen(false);
+              if (colOptionsIdx !== null) {
+                setColInsertAfterIdx(colOptionsIdx);
+                setColDateModalTarget("insert");
+                setColDateInput("");
+                setColDateModalOpen(true);
+              }
+            }}
+            className="flex items-center gap-3 rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            </span>
+            <div>
+              <div className="text-sm font-medium text-emerald-700 dark:text-emerald-400">Tambah Kolom</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Sisip kolom baru setelah kolom ini</div>
+            </div>
+          </button>
           <button
             type="button"
             onClick={() => {
