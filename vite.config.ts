@@ -15,8 +15,8 @@ export default defineConfig(({ command, mode }) => {
         registerType: 'autoUpdate',
         includeAssets: ['icon.png'],
         manifest: {
-          name: 'Kas Pemuda',
-          short_name: 'Kas',
+          name: 'Kas Permata',
+          short_name: 'Kas Permata',
           description: 'Aplikasi pencatatan kas pemuda',
           theme_color: '#1e293b',
           background_color: '#f8fafc',
