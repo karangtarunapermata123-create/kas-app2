@@ -29,6 +29,7 @@ import {
   saveRoutineSessions,
   setBookGroupMembers,
   setBookPermissions,
+  getUserBookPermissions,
 } from "../lib/store";
 import { formatIDR } from "../lib/money";
 import type {
@@ -120,6 +121,9 @@ export default function BukuKasPage() {
   const [alertMessage, setAlertMessage] = useState("");
   // State untuk expand/collapse group di modal kelola buku
   const [expandedGroupIds, setExpandedGroupIds] = useState<Set<string>>(new Set());
+  // State untuk quick add transaction
+  const [openQuickAddModal, setOpenQuickAddModal] = useState(false);
+  const [allowedBookIds, setAllowedBookIds] = useState<string[] | null>(null);
 
   function showAlert(message: string) {
     setAlertMessage(message);
@@ -962,31 +966,77 @@ export default function BukuKasPage() {
         })}
       </div>
 
-      {canManageBooks(profile?.role) && (
-        <button
-          type="button"
-          aria-label="Kelola buku kas"
-          className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 grid h-14 w-14 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800 md:bottom-6"
-          onClick={() => {
-            refreshBooks();
-            setOpenManageBooks(true);
-          }}
-        >
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-6 w-6"
-            aria-hidden="true"
+      {/* FAB group */}
+      <div className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 flex flex-col items-center gap-1.5 md:bottom-6">
+        {canManageBooks(profile?.role) && (
+          <button
+            type="button"
+            aria-label="Kelola buku kas"
+            className="grid h-12 w-12 place-items-center rounded-full bg-slate-900 text-white shadow-lg hover:bg-slate-800"
+            onClick={() => {
+              refreshBooks();
+              setOpenManageBooks(true);
+            }}
           >
-            <path d="M12 20h9" />
-            <path d="M16.5 3.5 a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
-          </svg>
-        </button>
-      )}
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-6 w-6"
+              aria-hidden="true"
+            >
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5 a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+            </svg>
+          </button>
+        )}
+
+        {/* FAB tombol + untuk quick add transaksi — hanya di halaman utama (tidak di dalam buku) */}
+        {!bookId && (
+          <button
+            type="button"
+            aria-label="Tambah transaksi"
+            className="grid h-14 w-14 place-items-center rounded-full bg-emerald-600 text-white shadow-lg hover:bg-emerald-500 active:scale-95 transition-all"
+            onClick={async () => {
+              refreshBooks();
+              // Load allowed book IDs
+              if (profile) {
+                if (profile.role === "super_admin") {
+                  // Super admin can see all books
+                  setAllowedBookIds(null);
+                } else if (profile.role === "admin") {
+                  // Admin only sees assigned books
+                  const allowedIds = await getUserBookPermissions(profile.id);
+                  setAllowedBookIds(allowedIds);
+                } else {
+                  // Members don't see any? Or maybe same as admin? Let's check existing logic
+                  // Wait, let's see what canEditTransactions does
+                  // From auth.tsx: canEditTransactions is only super_admin, so let's follow that
+                  setAllowedBookIds([]);
+                }
+              }
+              setOpenQuickAddModal(true);
+            }}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-7 w-7"
+              aria-hidden="true"
+            >
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+        )}
+      </div>
 
       <Modal
         open={openManageBooks}
@@ -1732,6 +1782,72 @@ export default function BukuKasPage() {
               }}
             >
               Simpan
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal pilih buku transaksi untuk quick add */}
+      <Modal
+        open={openQuickAddModal}
+        title="Tambah Transaksi"
+        onClose={() => setOpenQuickAddModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="text-sm text-slate-500">
+            Pilih buku transaksi tujuan:
+          </div>
+          <div className="grid gap-2 max-h-80 overflow-auto">
+            {books
+              .filter((b) => {
+                if (b.type !== "biasa") return false;
+                if (allowedBookIds === null) return true; // Super admin
+                return allowedBookIds.includes(b.id);
+              })
+              .map((b) => (
+                <button
+                  key={b.id}
+                  type="button"
+                  onClick={() => {
+                    setOpenQuickAddModal(false);
+                    navigate(`/buku-kas/${b.id}/transaksi`, { state: { openAddTransaction: true } });
+                  }}
+                  className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition"
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                      {b.name}
+                    </div>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      Buku Transaksi
+                    </div>
+                  </div>
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-4 w-4 shrink-0 text-slate-400"
+                  >
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </button>
+              ))}
+            {books.filter((b) => {
+                if (b.type !== "biasa") return false;
+                if (allowedBookIds === null) return true;
+                return allowedBookIds.includes(b.id);
+              }).length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-slate-400">
+                Belum ada buku transaksi yang dapat diakses.
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setOpenQuickAddModal(false)}>
+              Batal
             </Button>
           </div>
         </div>

@@ -115,7 +115,11 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const [sortKey, setSortKey] = useState<SortKey | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [openCategoryModal, setOpenCategoryModal] = useState(false);
-  const [openCreateDate, setOpenCreateDate] = useState(false);
+  const [openCreateDate, setOpenCreateDate] = useState(() => {
+    // Auto-open date picker if navigated from FAB quick-add
+    const state = location.state as { openAddTransaction?: boolean } | null;
+    return state?.openAddTransaction ?? false;
+  });
   const [createDate, setCreateDate] = useState(todayISO());
   const [calView, setCalView] = useState(todayISO());
   const [datePickerMode, setDatePickerMode] = useState<"create" | "form">(
