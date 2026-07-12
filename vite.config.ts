@@ -13,7 +13,7 @@ export default defineConfig(({ command, mode }) => {
       ...(useHttps ? [basicSsl()] : []),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['logo.png'],
+        includeAssets: ['icon.png'],
         manifest: {
           name: 'Kas Pemuda',
           short_name: 'Kas',
@@ -26,25 +26,25 @@ export default defineConfig(({ command, mode }) => {
           scope: '/',
           icons: [
             {
-              src: '/logo.png',
+              src: '/icon.png',
               sizes: '500x500',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/logo.png',
+              src: '/icon.png',
               sizes: '500x500',
               type: 'image/png',
               purpose: 'maskable',
             },
             {
-              src: '/logo.png',
+              src: '/icon.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/logo.png',
+              src: '/icon.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
