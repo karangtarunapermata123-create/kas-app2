@@ -92,16 +92,16 @@ function defaultDateForMonth(month: string): string {
 
 /**
  * Kompres gambar sebelum upload menggunakan Canvas API.
- * - Resize ke max 1920px di sisi terpanjang (tidak di-upscale)
- * - Re-encode ke JPEG quality 0.82
+ * - Resize ke max 1280px di sisi terpanjang (tidak di-upscale)
+ * - Re-encode ke JPEG quality 0.65
  * - Non-image dikembalikan as-is
  */
 async function compressImageFile(file: File): Promise<File> {
   if (!file.type.startsWith("image/")) return file;
 
   return new Promise((resolve) => {
-    const MAX_SIZE = 1920;
-    const QUALITY = 0.82;
+    const MAX_SIZE = 1024;
+    const QUALITY = 0.60;
 
     const img = new Image();
     const objectUrl = URL.createObjectURL(file);
@@ -283,6 +283,41 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     const t = setTimeout(recalcTableHeight, 50);
     return () => clearTimeout(t);
   }, [isSearchMode, viewAll, recalcTableHeight]);
+
+  // Paste gambar dari clipboard (Ctrl+V) saat modal transaksi terbuka
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of Array.from(items)) {
+        if (item.type.startsWith("image/")) {
+          const file = item.getAsFile();
+          if (!file) continue;
+
+          // Buat nama file dari timestamp
+          const ext = item.type.split("/")[1] || "png";
+          const named = new File([file], `paste-${Date.now()}.${ext}`, {
+            type: item.type,
+          });
+
+          if (named.size > 5 * 1024 * 1024) {
+            alert("Ukuran gambar maksimal 5MB");
+            return;
+          }
+
+          setForm((prev) => ({ ...prev, attachmentFile: named, attachmentUrl: undefined }));
+          e.preventDefault();
+          return; // Ambil gambar pertama saja
+        }
+      }
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [open]);
   useEffect(() => {
     getTransactions(bookId).then((txs) => {
       setTransactions(txs);
@@ -456,6 +491,21 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     setOpen(true);
   }
 
+  // Hapus lampiran dari storage langsung saat user klik silang
+  async function removeExistingAttachment() {
+    const urlToDelete = form.attachmentUrl;
+    // Clear form dulu supaya UI langsung update
+    setForm((prev) => ({ ...prev, attachmentUrl: undefined }));
+    // Hapus dari storage di background
+    if (urlToDelete) {
+      try {
+        await deleteTransactionAttachment(urlToDelete);
+      } catch (err) {
+        console.error("Gagal hapus lampiran dari storage:", err);
+      }
+    }
+  }
+
   async function submit() {
     const amount = toNumberSafe(form.amount);
     if (!form.date) return;
@@ -476,24 +526,15 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           tempId,
         );
 
-        // Hapus file lama jika sedang edit dan ada file lama
-        if (
-          editingId &&
-          form.attachmentUrl &&
-          form.attachmentUrl !== attachmentUrl
-        ) {
+        // Hapus file lama dari storage jika diganti dengan file baru
+        // (kasus: user tidak klik silang dulu, langsung pilih file baru)
+        if (editingId && form.attachmentUrl && form.attachmentUrl !== attachmentUrl) {
           await deleteTransactionAttachment(form.attachmentUrl);
         }
       }
 
-      // Jika sedang edit dan user menghapus lampiran (attachmentUrl jadi undefined)
-      // tapi tidak menggantinya dengan file baru — hapus file lama dari storage
-      if (editingId && !form.attachmentFile && !form.attachmentUrl) {
-        const originalTx = transactions.find((t) => t.id === editingId);
-        if (originalTx?.attachmentUrl) {
-          await deleteTransactionAttachment(originalTx.attachmentUrl);
-        }
-      }
+      // Catatan: jika user klik silang (remove), storage sudah dihapus langsung
+      // di removeExistingAttachment(), tidak perlu hapus lagi di sini.
 
       if (editingId) {
         await updateTransaction(bookId, editingId, {
@@ -1712,9 +1753,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                     </a>
                     <button
                       type="button"
-                      onClick={() =>
-                        setForm({ ...form, attachmentUrl: undefined })
-                      }
+                      onClick={() => removeExistingAttachment()}
                       className="text-slate-400 hover:text-red-600"
                       aria-label="Hapus lampiran"
                     >
@@ -1853,7 +1892,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                 </div>
               )}
               <div className="text-xs text-slate-500">
-                Pilih file atau ambil foto langsung. Format: gambar, PDF, Word, Excel. Maks 5MB.
+                Pilih file, ambil foto, atau tekan <kbd className="rounded border border-slate-300 bg-slate-100 px-1 font-mono text-[11px]">Ctrl+V</kbd> untuk paste gambar. Format: gambar, PDF, Word, Excel. Maks 5MB.
               </div>
             </div>
           </div>
