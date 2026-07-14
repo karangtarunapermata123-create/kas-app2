@@ -90,6 +90,75 @@ function defaultDateForMonth(month: string): string {
   return `${month}-${day}`;
 }
 
+/**
+ * Kompres gambar sebelum upload menggunakan Canvas API.
+ * - Resize ke max 1920px di sisi terpanjang (tidak di-upscale)
+ * - Re-encode ke JPEG quality 0.82
+ * - Non-image dikembalikan as-is
+ */
+async function compressImageFile(file: File): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+
+  return new Promise((resolve) => {
+    const MAX_SIZE = 1920;
+    const QUALITY = 0.82;
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      let { width, height } = img;
+
+      // Hitung dimensi baru (scale down saja, tidak upscale)
+      if (width > MAX_SIZE || height > MAX_SIZE) {
+        if (width > height) {
+          height = Math.round((height * MAX_SIZE) / width);
+          width = MAX_SIZE;
+        } else {
+          width = Math.round((width * MAX_SIZE) / height);
+          height = MAX_SIZE;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0, width, height);
+
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            // Fallback ke file asli kalau gagal
+            resolve(file);
+            return;
+          }
+          // Pakai nama file asli tapi ekstensinya .jpg
+          const baseName = file.name.replace(/\.[^.]+$/, "");
+          const compressed = new File([blob], `${baseName}.jpg`, {
+            type: "image/jpeg",
+            lastModified: Date.now(),
+          });
+          // Kalau hasil kompresi malah lebih besar (gambar kecil/sudah terkompresi),
+          // kembalikan file asli
+          resolve(compressed.size < file.size ? compressed : file);
+        },
+        "image/jpeg",
+        QUALITY,
+      );
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(file); // Fallback ke file asli
+    };
+
+    img.src = objectUrl;
+  });
+}
+
 export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const location = useLocation();
   const { profile } = useAuth();
@@ -380,7 +449,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       amount: String(t.amount),
       note: t.note,
       masukKeRekening: Boolean(t.masukKeRekening),
-      attachmentUrl: t.attachmentUrl,
+      attachmentUrl: t.attachmentUrl ?? undefined,
       attachmentFile: null,
     });
     setOpenInfo(false);
@@ -400,8 +469,10 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       // Upload file baru jika ada
       if (form.attachmentFile) {
         const tempId = editingId || `temp-${Date.now()}`;
+        // Kompres gambar sebelum upload (non-image dilewati otomatis)
+        const fileToUpload = await compressImageFile(form.attachmentFile);
         attachmentUrl = await uploadTransactionAttachment(
-          form.attachmentFile,
+          fileToUpload,
           tempId,
         );
 
@@ -415,6 +486,15 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
         }
       }
 
+      // Jika sedang edit dan user menghapus lampiran (attachmentUrl jadi undefined)
+      // tapi tidak menggantinya dengan file baru — hapus file lama dari storage
+      if (editingId && !form.attachmentFile && !form.attachmentUrl) {
+        const originalTx = transactions.find((t) => t.id === editingId);
+        if (originalTx?.attachmentUrl) {
+          await deleteTransactionAttachment(originalTx.attachmentUrl);
+        }
+      }
+
       if (editingId) {
         await updateTransaction(bookId, editingId, {
           date: form.date,
@@ -423,7 +503,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           amount,
           note: form.note,
           masukKeRekening: form.masukKeRekening,
-          attachmentUrl,
+          // Kirim null eksplisit jika lampiran dihapus, bukan undefined
+          attachmentUrl: (attachmentUrl ?? null) as string | null,
         });
         await getTransactions(bookId).then(setTransactions);
         closeModal();
