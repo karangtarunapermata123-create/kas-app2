@@ -57,7 +57,7 @@ export type Transaction = {
   amount: number;
   note: string;
   masukKeRekening?: boolean;
-  attachmentUrl?: string; // URL lampiran file dari Supabase Storage
+  attachmentUrl?: string | null; // URL lampiran file dari Supabase Storage
 };
 
 export type RoutineMember = {
