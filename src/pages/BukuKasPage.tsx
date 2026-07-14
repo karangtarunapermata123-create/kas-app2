@@ -248,8 +248,13 @@ export default function BukuKasPage() {
     return books.filter((book) => book.groupId === groupId).length;
   }
 
+  // Set kolektif book IDs untuk cek apakah groupId mengarah ke kolektif
+  const kolektifBookIds = new Set(books.filter((b) => b.type === "kolektif").map((b) => b.id));
+
   function getTopLevelBooks() {
-    return books.filter((book) => book.type === "group" || !book.groupId);
+    return books
+      .filter((book) => book.type === "group" || !book.groupId)
+      .sort((a, b) => a.name.localeCompare(b.name, "id", { sensitivity: "base" }));
   }
 
   function getAvailableBooksForGroup(groupId?: string | null) {
@@ -1045,7 +1050,7 @@ export default function BukuKasPage() {
       >
         <div className="grid gap-4">
           <div className="grid gap-2">
-            {books.filter((b) => !b.groupId).map((b) => {
+            {books.filter((b) => !b.groupId || (b.type === "biasa" && kolektifBookIds.has(b.groupId ?? ""))).map((b) => {
               const isGroup = b.type === "group";
               const groupMembers = isGroup ? books.filter((m) => m.groupId === b.id) : [];
               const isExpanded = expandedGroupIds.has(b.id);

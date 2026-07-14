@@ -319,6 +319,44 @@ export async function deleteKolektifRow(rowId: string): Promise<void> {
   if (error) throw error;
 }
 
+// ─── Kolektif Linked Transaction Books ───────────────────────────────────────
+// Buku transaksi (type=biasa) yang di-link ke buku kolektif menggunakan group_id
+
+export async function getKolektifLinkedBooks(kolektifBookId: string): Promise<Book[]> {
+  const { data, error } = await supabase
+    .from("books")
+    .select("*")
+    .eq("group_id", kolektifBookId)
+    .eq("type", "biasa");
+  if (error) throw error;
+  return (data ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    type: b.type as Book["type"],
+    groupId: b.group_id ?? null,
+    tabLabel: (b as any).tab_label ?? null,
+  }));
+}
+
+export async function linkBookToKolektif(
+  bookId: string,
+  kolektifBookId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("books")
+    .update({ group_id: kolektifBookId })
+    .eq("id", bookId);
+  if (error) throw error;
+}
+
+export async function unlinkBookFromKolektif(bookId: string): Promise<void> {
+  const { error } = await supabase
+    .from("books")
+    .update({ group_id: null })
+    .eq("id", bookId);
+  if (error) throw error;
+}
+
 // ─── Organization Name ────────────────────────────────────────────────────────
 // Tetap pakai localStorage karena ini hanya setting lokal UI
 export function getOrganizationName(): string {
@@ -350,6 +388,7 @@ export async function getBooks(): Promise<Book[]> {
     name: b.name,
     type: b.type as Book["type"],
     groupId: b.group_id ?? null,
+    tabLabel: (b as any).tab_label ?? null,
   }));
 }
 
@@ -362,6 +401,17 @@ export async function saveBooks(books: Book[]): Promise<void> {
     group_id: b.groupId ?? null,
   }));
   const { error } = await supabase.from("books").upsert(rows);
+  if (error) throw error;
+}
+
+export async function saveBookTabLabel(
+  bookId: string,
+  tabLabel: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("books")
+    .update({ tab_label: tabLabel?.trim() || null })
+    .eq("id", bookId);
   if (error) throw error;
 }
 
@@ -505,13 +555,16 @@ export async function getBookSaldo(book: Book): Promise<number> {
   }
 
   if (book.type === "kolektif") {
-    const sessions = await getKolektifSessions(book.id);
-    const totals = await Promise.all(
+    const [sessions, linkedBooks] = await Promise.all([
+      getKolektifSessions(book.id),
+      getKolektifLinkedBooks(book.id),
+    ]);
+    const sessionTotals = await Promise.all(
       sessions.map((s) => getKolektifConfig(s.id)),
     );
-    return totals.reduce((sum, cfg) => {
+    const subBukuTotal = sessionTotals.reduce((sum, cfg) => {
       return sum + cfg.rows.reduce((rowSum, row) => {
-        let r = rowSum + row.amount; // nominal column always included
+        let r = rowSum + row.amount;
         if (cfg.headerLabelType === "number") {
           r += (row.headerValue ?? (Number(row.label) || 0));
         }
@@ -521,6 +574,14 @@ export async function getBookSaldo(book: Book): Promise<number> {
         return r;
       }, 0);
     }, 0);
+    const linkedTotals = await Promise.all(
+      linkedBooks.map(async (b) => {
+        const tx = await getTransactions(b.id);
+        return tx.reduce((acc, t) => acc + (t.type === "masuk" ? t.amount : -t.amount), 0);
+      }),
+    );
+    const linkedTotal = linkedTotals.reduce((sum, v) => sum + v, 0);
+    return subBukuTotal + linkedTotal;
   }
 
   const tx = await getTransactions(book.id);
@@ -533,7 +594,16 @@ export async function getBookSaldo(book: Book): Promise<number> {
 export async function getBookStatsMap(
   books: Book[],
 ): Promise<Record<string, number>> {
-  const nonGroupBooks = books.filter((book) => book.type !== "group");
+  const kolektifIds = new Set(
+    books.filter((b) => b.type === "kolektif").map((b) => b.id),
+  );
+  // Buku biasa yang linked ke kolektif (groupId mengarah ke kolektif) dikecualikan
+  // dari standalone — sudah dihitung dalam saldo kolektif-nya
+  const nonGroupBooks = books.filter(
+    (book) =>
+      book.type !== "group" &&
+      !(book.type === "biasa" && book.groupId && kolektifIds.has(book.groupId)),
+  );
   const leafEntries = await Promise.all(
     nonGroupBooks.map(
       async (book) => [book.id, await getBookSaldo(book)] as const,

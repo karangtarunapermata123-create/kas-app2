@@ -169,8 +169,11 @@ function AppShell() {
         books: Awaited<ReturnType<typeof getBooks>>,
         targetBookId: string,
       ) => {
-        const parentGroupId = books.find((b) => b.id === targetBookId)?.groupId;
-        return parentGroupId ? `/buku-kas/group/${parentGroupId}` : "/buku-kas";
+        const target = books.find((b) => b.id === targetBookId);
+        if (!target?.groupId) return "/buku-kas";
+        const parent = books.find((b) => b.id === target.groupId);
+        if (parent?.type === "kolektif") return `/buku-kas-kolektif/${parent.id}`;
+        return `/buku-kas/group/${target.groupId}`;
       };
 
       if (isBookGroupRoute && parts[2]) {

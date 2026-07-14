@@ -7,6 +7,7 @@ export type Book = {
   name: string;
   type: BookType;
   groupId?: string | null;
+  tabLabel?: string | null; // Label tab khusus untuk buku kolektif (opsional, fallback ke name)
 };
 
 export type KolektifSession = {

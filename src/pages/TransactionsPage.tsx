@@ -1017,120 +1017,117 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     <div className="relative min-w-0 flex flex-col flex-1" ref={containerRef}>
       {/* Semua elemen di atas tabel — diukur untuk kalkulasi tinggi tabel */}
       <div ref={aboveTableRef}>
-      {/* Search Bar and Export Button */}
-      <div className="mb-3 flex items-center gap-2">
-        <div className="relative flex-1">
-          <input
-            type="text"
-            placeholder="Cari berdasarkan catatan (semua tahun)..."
-            value={searchQuery}
-            onChange={(e) => {
-              setSearchQuery(e.target.value);
-              setIsSearchMode(e.target.value.trim().length > 0);
-            }}
-            className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 pl-10 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-slate-400 dark:focus:ring-slate-400"
-          />
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400"
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-          {searchQuery && (
+      {/* Tab Semua / Per Bulan + Search + Export dalam satu baris */}
+      {isSearchMode ? (
+        /* Mode search: search bar full width + export */
+        <div className="mb-3 flex items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              type="text"
+              placeholder="Cari catatan..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setIsSearchMode(e.target.value.trim().length > 0);
+              }}
+              className="w-full rounded-lg border border-slate-300 bg-white px-4 py-2 pl-10 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-slate-400 dark:focus:ring-slate-400"
+              autoFocus
+            />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" aria-hidden="true">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
             <button
               type="button"
-              onClick={() => {
-                setSearchQuery("");
-                setIsSearchMode(false);
-              }}
+              onClick={() => { setSearchQuery(""); setIsSearchMode(false); }}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               aria-label="Clear search"
             >
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="h-5 w-5"
-              >
-                <path d="M18 6 6 18" />
-                <path d="m6 6 12 12" />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                <path d="M18 6 6 18" /><path d="m6 6 12 12" />
               </svg>
             </button>
-          )}
-        </div>
-        <Button
-          variant="secondary"
-          onClick={exportToExcel}
-          disabled={displayed.length === 0}
-          className="whitespace-nowrap flex items-center gap-1"
-          aria-label="Export ke Excel"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="h-4 w-4"
+          </div>
+          {/* Export icon-only */}
+          <button
+            type="button"
+            onClick={exportToExcel}
+            disabled={displayed.length === 0}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            aria-label="Export ke Excel"
           >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" x2="12" y1="15" y2="3" />
-          </svg>
-          <span className="hidden sm:inline">Export</span>
-        </Button>
-      </div>
-      {isSearchMode && (
-        <div className="mb-2 text-xs text-slate-500">
-          Menampilkan hasil pencarian dari semua bulan ({displayed.length}{" "}
-          transaksi ditemukan)
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" x2="12" y1="15" y2="3" />
+            </svg>
+          </button>
         </div>
-      )}
-
-      {/* Tab Semua / Per Bulan - Hidden when searching */}
-      {!isSearchMode && (
+      ) : (
+        /* Mode normal: tab + search + export dalam satu baris */
         <div className="mb-3 flex flex-col gap-2">
-          {/* 2 Tab */}
-          <div className="flex rounded-lg border dark:border-slate-700 overflow-hidden w-fit">
+          <div className="flex items-center gap-2">
+            {/* Tab Semua / Per Bulan */}
+            <div className="flex rounded-lg border dark:border-slate-700 overflow-hidden shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setViewAll(true);
+                  const total = (mode === "rekening"
+                    ? transactions.filter((t) => t.masukKeRekening)
+                    : transactions).length;
+                  setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+                }}
+                className={`px-3 py-1.5 text-sm font-medium transition ${
+                  viewAll
+                    ? "bg-slate-900 dark:bg-slate-700 text-white"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                }`}
+              >
+                Semua
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewAll(false)}
+                className={`px-3 py-1.5 text-sm font-medium transition border-l dark:border-slate-700 ${
+                  !viewAll
+                    ? "bg-slate-900 dark:bg-slate-700 text-white"
+                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                }`}
+              >
+                Per Bulan
+              </button>
+            </div>
+
+            {/* Search — collapsed jadi icon, klik expand */}
+            <div className="relative flex-1 min-w-0">
+              <input
+                type="text"
+                placeholder="Cari catatan..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setIsSearchMode(e.target.value.trim().length > 0);
+                }}
+                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-slate-400 dark:focus:ring-slate-400"
+              />
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden="true">
+                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+              </svg>
+            </div>
+
+            {/* Export icon-only */}
             <button
               type="button"
-              onClick={() => {
-                setViewAll(true);
-                const total = (mode === "rekening"
-                  ? transactions.filter((t) => t.masukKeRekening)
-                  : transactions).length;
-                setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
-              }}
-              className={`px-4 py-1.5 text-sm font-medium transition ${
-                viewAll
-                  ? "bg-slate-900 dark:bg-slate-700 text-white"
-                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-              }`}
+              onClick={exportToExcel}
+              disabled={displayed.length === 0}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+              aria-label="Export ke Excel"
             >
-              Semua
-            </button>
-            <button
-              type="button"
-              onClick={() => { setViewAll(false); }}
-              className={`px-4 py-1.5 text-sm font-medium transition border-l dark:border-slate-700 ${
-                !viewAll
-                  ? "bg-slate-900 dark:bg-slate-700 text-white"
-                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-              }`}
-            >
-              Per Bulan
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" x2="12" y1="15" y2="3" />
+              </svg>
             </button>
           </div>
 
@@ -1178,28 +1175,21 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
             const totalPages = Math.ceil(totalItems / ALL_PAGE_SIZE) || 1;
             return (
               <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  disabled={allPage === 0}
-                  onClick={() => setAllPage((p) => p - 1)}
-                  className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
-                >
+                <button type="button" disabled={allPage === 0} onClick={() => setAllPage((p) => p - 1)} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
                   ← Sebelumnya
                 </button>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
-                  {allPage + 1} / {totalPages}
-                </span>
-                <button
-                  type="button"
-                  disabled={allPage >= totalPages - 1}
-                  onClick={() => setAllPage((p) => p + 1)}
-                  className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
-                >
+                <span className="text-xs text-slate-500 dark:text-slate-400">{allPage + 1} / {totalPages}</span>
+                <button type="button" disabled={allPage >= totalPages - 1} onClick={() => setAllPage((p) => p + 1)} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
                   Selanjutnya →
                 </button>
               </div>
             );
           })()}
+        </div>
+      )}
+      {isSearchMode && (
+        <div className="mb-2 text-xs text-slate-500">
+          Hasil pencarian dari semua bulan ({displayed.length} transaksi)
         </div>
       )}
       </div>{/* end aboveTableRef */}
@@ -1339,7 +1329,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                     {formatIDR(totals.keluar)}
                   </td>
                 </tr>
-                <tr className="border-t-2 border-slate-500 font-semibold dark:border-slate-500 dark:text-slate-200">
+                <tr className={`border-t-2 border-slate-500 font-semibold dark:border-slate-500 dark:text-slate-200 ${totals.saldo < 0 ? "bg-rose-50 dark:bg-rose-900/20" : "bg-emerald-50 dark:bg-emerald-900/20"}`}>
                   <td
                     className="py-3 pl-4 pr-3"
                     colSpan={mode === "semua" ? 6 : 5}
