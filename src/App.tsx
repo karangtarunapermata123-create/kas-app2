@@ -407,7 +407,7 @@ function AppShell() {
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 flex flex-col overflow-y-auto scrollbar-hide px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-6 md:pt-4">
+          <main className="min-w-0 flex-1 flex flex-col overflow-y-auto scrollbar-hide px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-6 md:pt-4 overflow-x-hidden">
             <Routes>
               <Route path="/" element={<Navigate to="/buku-kas" replace />} />
               <Route path="/buku-kas" element={<BukuKasPage />} />

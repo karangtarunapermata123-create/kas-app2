@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import ExcelJS from "exceljs";
 import Button from "../components/Button";
@@ -95,6 +95,11 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   const { profile } = useAuth();
   const [userCanEdit, setUserCanEdit] = useState(false);
 
+  // Refs untuk mengukur tinggi elemen di atas tabel secara dinamis
+  const aboveTableRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tableMaxHeight, setTableMaxHeight] = useState<string>("55vh");
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [selectedMonth, setSelectedMonth] = useState(() => {
@@ -176,6 +181,39 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     canEditBook(profile, bookId).then(setUserCanEdit);
   }, [profile, bookId]);
 
+  // Kalkulasi tinggi tabel secara dinamis berdasarkan ruang yang tersisa
+  const recalcTableHeight = useCallback(() => {
+    if (!aboveTableRef.current) return;
+    const aboveHeight = aboveTableRef.current.getBoundingClientRect().height;
+    const aboveTop = aboveTableRef.current.getBoundingClientRect().top;
+    // Tinggi yang tersedia = dari bawah elemen "above" sampai batas bawah viewport
+    // Dikurangi padding bawah: mobile (bottom nav ~64px + safe area + 16px padding)
+    //                          desktop (24px padding bawah)
+    const isMobile = window.innerWidth < 768;
+    const bottomPadding = isMobile ? 80 : 24; // px
+    const extraGap = 8; // gap antara above dan tabel card
+    const available = window.innerHeight - (aboveTop + aboveHeight) - bottomPadding - extraGap;
+    const min = 200;
+    setTableMaxHeight(`${Math.max(min, available)}px`);
+  }, []);
+
+  useEffect(() => {
+    recalcTableHeight();
+    const observer = new ResizeObserver(recalcTableHeight);
+    if (aboveTableRef.current) observer.observe(aboveTableRef.current);
+    window.addEventListener("resize", recalcTableHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", recalcTableHeight);
+    };
+  }, [recalcTableHeight]);
+
+  // Recalc juga saat mode/filter berubah (tinggi elemen above berubah)
+  useEffect(() => {
+    // Sedikit delay agar DOM update dulu sebelum ukur
+    const t = setTimeout(recalcTableHeight, 50);
+    return () => clearTimeout(t);
+  }, [isSearchMode, viewAll, recalcTableHeight]);
   useEffect(() => {
     getTransactions(bookId).then((txs) => {
       setTransactions(txs);
@@ -854,7 +892,9 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
   }, [filtered, mode]);
 
   return (
-    <div className="relative min-w-0">
+    <div className="relative min-w-0 flex flex-col flex-1" ref={containerRef}>
+      {/* Semua elemen di atas tabel — diukur untuk kalkulasi tinggi tabel */}
+      <div ref={aboveTableRef}>
       {/* Search Bar and Export Button */}
       <div className="mb-3 flex items-center gap-2">
         <div className="relative flex-1">
@@ -1040,8 +1080,9 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           })()}
         </div>
       )}
+      </div>{/* end aboveTableRef */}
 
-      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800">
+      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 flex flex-col" style={{ minHeight: 0 }}>
         {displayed.length === 0 ? (
           <div className="px-4 py-6 text-sm text-slate-600">
             {mode === "rekening"
@@ -1049,7 +1090,12 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
               : "Belum ada transaksi tunai."}
           </div>
         ) : (
-          <div className="w-full min-w-0 max-h-[55vh] overflow-auto md:max-h-[65vh]">
+          <div
+            className="w-full min-w-0 overflow-auto"
+            style={{
+              maxHeight: tableMaxHeight,
+            }}
+          >
             <table className="w-full text-left text-sm">
               <thead className="sticky top-0 bg-white text-xs uppercase text-slate-500 dark:bg-slate-800 dark:text-slate-400">
                 <tr>
@@ -1174,12 +1220,10 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                 <tr className="border-t-2 border-slate-500 font-semibold dark:border-slate-500 dark:text-slate-200">
                   <td
                     className="py-3 pl-4 pr-3"
-                    colSpan={mode === "semua" ? 4 : 3}
+                    colSpan={mode === "semua" ? 6 : 5}
                   >
-                    Saldo
-                  </td>
-                  <td className="py-3 pr-3 text-right" colSpan={2}>
-                    {formatIDR(totals.saldo)}
+                    <span className="mr-3">Saldo</span>
+                    <span>{formatIDR(totals.saldo)}</span>
                   </td>
                 </tr>
               </tbody>
@@ -1660,41 +1704,75 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
                   </div>
                 </div>
               ) : (
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600 hover:border-slate-400 hover:bg-slate-100">
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-5 w-5"
-                  >
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                    <polyline points="17 8 12 3 7 8" />
-                    <line x1="12" x2="12" y1="3" y2="15" />
-                  </svg>
-                  <span>Pilih file (gambar, PDF, dll)</span>
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        // Max 5MB
-                        if (file.size > 5 * 1024 * 1024) {
-                          alert("Ukuran file maksimal 5MB");
-                          return;
+                <div className="grid grid-cols-2 gap-2">
+                  {/* Pilih dari galeri/file */}
+                  <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600 hover:border-slate-400 hover:bg-slate-100">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" x2="12" y1="3" y2="15" />
+                    </svg>
+                    <span className="text-center text-xs leading-tight">Pilih File</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*,.pdf,.doc,.docx,.xls,.xlsx"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 5 * 1024 * 1024) {
+                            alert("Ukuran file maksimal 5MB");
+                            return;
+                          }
+                          setForm({ ...form, attachmentFile: file });
                         }
-                        setForm({ ...form, attachmentFile: file });
-                      }
-                    }}
-                  />
-                </label>
+                      }}
+                    />
+                  </label>
+                  {/* Ambil foto dari kamera */}
+                  <label className="flex cursor-pointer flex-col items-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 px-3 py-3 text-sm text-slate-600 hover:border-slate-400 hover:bg-slate-100">
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-5 w-5"
+                    >
+                      <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                      <circle cx="12" cy="13" r="3" />
+                    </svg>
+                    <span className="text-center text-xs leading-tight">Ambil Foto</span>
+                    <input
+                      type="file"
+                      className="hidden"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 5 * 1024 * 1024) {
+                            alert("Ukuran file maksimal 5MB");
+                            return;
+                          }
+                          setForm({ ...form, attachmentFile: file });
+                        }
+                      }}
+                    />
+                  </label>
+                </div>
               )}
               <div className="text-xs text-slate-500">
-                Format: gambar, PDF, Word, Excel. Maksimal 5MB.
+                Pilih file atau ambil foto langsung. Format: gambar, PDF, Word, Excel. Maks 5MB.
               </div>
             </div>
           </div>

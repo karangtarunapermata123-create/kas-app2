@@ -191,7 +191,7 @@ export default function BukuKasPage() {
       isRekeningTransactionsPage || location.pathname.endsWith("/transaksi");
 
     return (
-      <div className="grid gap-4">
+      <div className={isTransactionsPage ? "flex flex-col flex-1 min-h-0" : "grid gap-4"}>
         {isTransactionsPage ? (
           <TransactionsPage
             bookId={bookId}
