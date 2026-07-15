@@ -338,6 +338,23 @@ export async function getKolektifLinkedBooks(kolektifBookId: string): Promise<Bo
   }));
 }
 
+// Buku kolektif (type=kolektif) yang di-link ke buku kolektif ini menggunakan group_id
+export async function getKolektifLinkedKolektifBooks(kolektifBookId: string): Promise<Book[]> {
+  const { data, error } = await supabase
+    .from("books")
+    .select("*")
+    .eq("group_id", kolektifBookId)
+    .eq("type", "kolektif");
+  if (error) throw error;
+  return (data ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    type: b.type as Book["type"],
+    groupId: b.group_id ?? null,
+    tabLabel: (b as any).tab_label ?? null,
+  }));
+}
+
 export async function linkBookToKolektif(
   bookId: string,
   kolektifBookId: string,

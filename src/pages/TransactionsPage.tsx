@@ -1066,36 +1066,25 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
         /* Mode normal: tab + search + export dalam satu baris */
         <div className="mb-3 flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            {/* Tab Semua / Per Bulan */}
-            <div className="flex rounded-lg border dark:border-slate-700 overflow-hidden shrink-0">
-              <button
-                type="button"
-                onClick={() => {
-                  setViewAll(true);
-                  const total = (mode === "rekening"
-                    ? transactions.filter((t) => t.masukKeRekening)
-                    : transactions).length;
-                  setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+            {/* Dropdown Semua / Per Bulan */}
+            <div className="shrink-0">
+              <Select
+                value={viewAll ? "semua" : "bulan"}
+                onChange={(e) => {
+                  const isViewAll = e.target.value === "semua";
+                  setViewAll(isViewAll);
+                  if (isViewAll) {
+                    const total = (mode === "rekening"
+                      ? transactions.filter((t) => t.masukKeRekening)
+                      : transactions).length;
+                    setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+                  }
                 }}
-                className={`px-3 py-1.5 text-sm font-medium transition ${
-                  viewAll
-                    ? "bg-slate-900 dark:bg-slate-700 text-white"
-                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                }`}
+                className="py-1.5"
               >
-                Semua
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewAll(false)}
-                className={`px-3 py-1.5 text-sm font-medium transition border-l dark:border-slate-700 ${
-                  !viewAll
-                    ? "bg-slate-900 dark:bg-slate-700 text-white"
-                    : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                }`}
-              >
-                Per Bulan
-              </button>
+                <option value="semua">Semua</option>
+                <option value="bulan">Per Bulan</option>
+              </Select>
             </div>
 
             {/* Search — collapsed jadi icon, klik expand */}

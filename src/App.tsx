@@ -203,8 +203,20 @@ function AppShell() {
         parts[3]
       ) {
         const books = await getBooks();
-        title = books.find((b) => b.id === parts[1])?.name ?? "Buku Kolektif";
-        backTo = `/buku-kas-kolektif/${parts[1]}`;
+        const sessionBook = books.find((b) => b.id === parts[1]);
+        title = sessionBook?.name ?? "Buku Kolektif";
+        // Kalau buku ini punya groupId yang mengarah ke kolektif lain,
+        // kembali ke kolektif parent, bukan ke diri sendiri
+        if (sessionBook?.groupId) {
+          const parent = books.find((b) => b.id === sessionBook.groupId);
+          if (parent?.type === "kolektif") {
+            backTo = `/buku-kas-kolektif/${parent.id}`;
+          } else {
+            backTo = `/buku-kas-kolektif/${parts[1]}`;
+          }
+        } else {
+          backTo = `/buku-kas-kolektif/${parts[1]}`;
+        }
       } else if (parts[0] === "buku-kas-kolektif" && parts[1]) {
         const books = await getBooks();
         title = books.find((b) => b.id === parts[1])?.name ?? "Buku Kolektif";

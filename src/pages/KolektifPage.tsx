@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import Button from "../components/Button";
 import Input from "../components/Input";
 import Modal from "../components/Modal";
@@ -14,6 +14,7 @@ import {
   getBooks,
   getTransactions,
   getKolektifLinkedBooks,
+  getKolektifLinkedKolektifBooks,
   linkBookToKolektif,
   unlinkBookFromKolektif,
   renameBook,
@@ -22,9 +23,73 @@ import {
 import { formatIDR } from "../lib/money";
 import type { Book, KolektifSession } from "../lib/types";
 
+// Komponen untuk render sub-buku list dari buku kolektif yang di-link
+function LinkedKolektifView({ bookId }: { bookId: string }) {
+  const navigate = useNavigate();
+  const [sessions, setSessions] = useState<KolektifSession[]>([]);
+  const [sessionTotals, setSessionTotals] = useState<Record<string, number>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const list = await getKolektifSessions(bookId);
+      setSessions(list);
+      const totals: Record<string, number> = {};
+      await Promise.all(
+        list.map(async (s) => {
+          const cfg = await getKolektifConfig(s.id);
+          totals[s.id] = cfg.rows.reduce((sum, r) => {
+            let rowTotal = r.amount;
+            if (cfg.headerLabelType === "number") rowTotal += (r.headerValue ?? (Number(r.label) || 0));
+            if (cfg.noteLabelType === "number") rowTotal += (r.noteValue ?? (Number(r.note) || 0));
+            return sum + rowTotal;
+          }, 0);
+        }),
+      );
+      setSessionTotals(totals);
+    }
+    setLoading(true);
+    load().finally(() => setLoading(false));
+  }, [bookId]);
+
+  if (loading) return (
+    <div className="flex items-center justify-center py-8 text-slate-400 text-sm">Memuat...</div>
+  );
+
+  if (sessions.length === 0) return (
+    <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-6 py-12 text-center">
+      <div className="text-slate-400 dark:text-slate-500 text-sm">Belum ada sub-buku di buku kolektif ini.</div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-y-auto max-h-[55vh]">
+      {sessions.map((session, idx) => (
+        <button
+          key={session.id}
+          type="button"
+          onClick={() => navigate(`/buku-kas-kolektif/${bookId}/sesi/${session.id}`)}
+          className={`w-full flex items-center justify-between gap-3 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 ${
+            idx !== 0 ? "border-t border-slate-100 dark:border-slate-700" : ""
+          }`}
+        >
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0">{idx + 1}.</span>
+            <span className="font-medium text-slate-900 dark:text-white truncate">{session.name}</span>
+          </div>
+          <span className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 tabular-nums shrink-0">
+            {formatIDR(sessionTotals[session.id] ?? 0)}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function KolektifPage() {
   const { bookId } = useParams<{ bookId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { profile } = useAuth();
   const [userCanEdit, setUserCanEdit] = useState(false);
 
@@ -35,9 +100,10 @@ export default function KolektifPage() {
     canEditBook(profile, safeBookId).then(setUserCanEdit);
   }, [profile, safeBookId]);
 
-  // Tab state: "sub-buku" | "transaksi"
-  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi">("sub-buku");
+  // Tab state: "sub-buku" | "transaksi" | "kolektif"
+  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif">("sub-buku");
   const [selectedLinkedBookId, setSelectedLinkedBookId] = useState<string | null>(null);
+  const [selectedLinkedKolektifBookId, setSelectedLinkedKolektifBookId] = useState<string | null>(null);
 
   // Nama buku kolektif ini (dari books.name)
   const [kolektifBookName, setKolektifBookName] = useState<string>("");
@@ -64,6 +130,21 @@ export default function KolektifPage() {
   // Label tab per linked book: bookId → label (tab_label ?? name)
   const [linkedBookTabLabels, setLinkedBookTabLabels] = useState<Record<string, string>>({});
 
+  // Linked kolektif books
+  const [linkedKolektifBooks, setLinkedKolektifBooks] = useState<Book[]>([]);
+  const [linkedKolektifTabLabels, setLinkedKolektifTabLabels] = useState<Record<string, string>>({});
+  const [linkedKolektifBookTotals, setLinkedKolektifBookTotals] = useState<Record<string, number>>({});
+
+  // Modal info/aksi buku kolektif yang di-link (klik tab aktif)
+  const [openLinkedKolektifModal, setOpenLinkedKolektifModal] = useState(false);
+  // Modal tambah sub-buku untuk linked kolektif book
+  const [openAddLinkedSubModal, setOpenAddLinkedSubModal] = useState(false);
+  const [newLinkedSubName, setNewLinkedSubName] = useState("");
+  // Modal unlink buku kolektif
+  const [openUnlinkKolektifModal, setOpenUnlinkKolektifModal] = useState(false);
+  // Counter untuk force-remount LinkedKolektifView setelah tambah sub-buku
+  const [linkedKolektifRefreshKey, setLinkedKolektifRefreshKey] = useState(0);
+
   // Modal tambah sub-buku
   const [openAddModal, setOpenAddModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -77,10 +158,16 @@ export default function KolektifPage() {
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
   const [deletingSession, setDeletingSession] = useState<KolektifSession | null>(null);
 
-  // Modal tambah buku transaksi
+  // Modal tambah buku (type picker dulu)
+  const [openAddTypeModal, setOpenAddTypeModal] = useState(false);
   const [openAddBookModal, setOpenAddBookModal] = useState(false);
   const [availableBooks, setAvailableBooks] = useState<Book[]>([]);
   const [selectedBookId, setSelectedBookId] = useState<string>("");
+
+  // Modal tambah buku kolektif
+  const [openAddKolektifBookModal, setOpenAddKolektifBookModal] = useState(false);
+  const [availableKolektifBooks, setAvailableKolektifBooks] = useState<Book[]>([]);
+  const [selectedKolektifBookId, setSelectedKolektifBookId] = useState<string>("");
 
   // Modal hapus linked book
   const [openUnlinkModal, setOpenUnlinkModal] = useState(false);
@@ -89,13 +176,15 @@ export default function KolektifPage() {
   const [saving, setSaving] = useState(false);
 
   const refresh = async () => {
-    const [list, linked, allBooks] = await Promise.all([
+    const [list, linked, linkedKolektif, allBooks] = await Promise.all([
       getKolektifSessions(safeBookId),
       getKolektifLinkedBooks(safeBookId),
+      getKolektifLinkedKolektifBooks(safeBookId),
       getBooks(),
     ]);
     setSessions(list);
     setLinkedBooks(linked);
+    setLinkedKolektifBooks(linkedKolektif);
     // Ambil nama buku kolektif ini
     const thisBook = allBooks.find((b) => b.id === safeBookId);
     if (thisBook) {
@@ -108,6 +197,12 @@ export default function KolektifPage() {
       tabLabels[b.id] = b.tabLabel || b.name;
     }
     setLinkedBookTabLabels(tabLabels);
+    // Set label tab per linked kolektif book
+    const kolektifTabLabelMap: Record<string, string> = {};
+    for (const b of linkedKolektif) {
+      kolektifTabLabelMap[b.id] = b.tabLabel || b.name;
+    }
+    setLinkedKolektifTabLabels(kolektifTabLabelMap);
 
     // Load total per session
     const totals: Record<string, number> = {};
@@ -141,16 +236,62 @@ export default function KolektifPage() {
     );
     setLinkedBookTotals(bookTotals);
 
+    // Load total per linked kolektif book (sum semua sessions-nya)
+    const kolektifBookTotals: Record<string, number> = {};
+    await Promise.all(
+      linkedKolektif.map(async (b) => {
+        const subSessions = await getKolektifSessions(b.id);
+        const subTotals = await Promise.all(
+          subSessions.map(async (s) => {
+            const cfg = await getKolektifConfig(s.id);
+            return cfg.rows.reduce((sum, r) => {
+              let rowTotal = r.amount;
+              if (cfg.headerLabelType === "number") {
+                rowTotal += (r.headerValue ?? (Number(r.label) || 0));
+              }
+              if (cfg.noteLabelType === "number") {
+                rowTotal += (r.noteValue ?? (Number(r.note) || 0));
+              }
+              return sum + rowTotal;
+            }, 0);
+          }),
+        );
+        kolektifBookTotals[b.id] = subTotals.reduce((a, v) => a + v, 0);
+      }),
+    );
+    setLinkedKolektifBookTotals(kolektifBookTotals);
+
     // Set selected linked book jika belum ada
     setSelectedLinkedBookId((prev) => {
       if (prev && linked.some((b) => b.id === prev)) return prev;
       return linked[0]?.id ?? null;
     });
+    // Set selected linked kolektif book jika belum ada
+    setSelectedLinkedKolektifBookId((prev) => {
+      if (prev && linkedKolektif.some((b) => b.id === prev)) return prev;
+      return linkedKolektif[0]?.id ?? null;
+    });
+
+    return { list, linked, linkedKolektif };
   };
 
   useEffect(() => {
+    const autoTab = (location.state as { autoTab?: boolean } | null)?.autoTab;
     setLoading(true);
-    refresh().finally(() => setLoading(false));
+    refresh().then((data) => {
+      if (autoTab && data) {
+        const { linked, linkedKolektif, list } = data;
+        if (linked.length > 0) {
+          setSelectedLinkedBookId(linked[0].id);
+          setActiveTab("transaksi");
+        } else if (linkedKolektif.length > 0) {
+          setSelectedLinkedKolektifBookId(linkedKolektif[0].id);
+          setActiveTab("kolektif");
+        } else if (list.length > 0) {
+          setActiveTab("sub-buku");
+        }
+      }
+    }).finally(() => setLoading(false));
   }, [safeBookId]);
 
   const subBukuGrandTotal = sessions.reduce(
@@ -171,7 +312,11 @@ export default function KolektifPage() {
     (sum, b) => sum + (linkedBookTotals[b.id] ?? 0),
     0,
   );
-  const grandTotal = subBukuGrandTotal + linkedGrandTotal;
+  const linkedKolektifGrandTotal = linkedKolektifBooks.reduce(
+    (sum, b) => sum + (linkedKolektifBookTotals[b.id] ?? 0),
+    0,
+  );
+  const grandTotal = subBukuGrandTotal + linkedGrandTotal + linkedKolektifGrandTotal;
 
   // ── Sub-buku handlers ────────────────────────────────────────────────────
 
@@ -241,6 +386,23 @@ export default function KolektifPage() {
     setOpenAddBookModal(true);
   }
 
+  async function openAddKolektifBookModalFn() {
+    const all = await getBooks();
+    const linkedIds = new Set(linkedKolektifBooks.map((b) => b.id));
+    const kolektifIds = new Set(all.filter((b) => b.type === "kolektif").map((b) => b.id));
+    // Buku kolektif yang belum di-link ke kolektif manapun dan bukan diri sendiri
+    const candidates = all.filter(
+      (b) =>
+        b.type === "kolektif" &&
+        b.id !== safeBookId &&
+        !linkedIds.has(b.id) &&
+        !(b.groupId && kolektifIds.has(b.groupId)),
+    );
+    setAvailableKolektifBooks(candidates);
+    setSelectedKolektifBookId(candidates[0]?.id ?? "");
+    setOpenAddKolektifBookModal(true);
+  }
+
   async function handleLinkBook() {
     if (!selectedBookId) return;
     setSaving(true);
@@ -254,6 +416,20 @@ export default function KolektifPage() {
     }
   }
 
+  async function handleLinkKolektifBook() {
+    if (!selectedKolektifBookId) return;
+    setSaving(true);
+    try {
+      await linkBookToKolektif(selectedKolektifBookId, safeBookId);
+      await refresh();
+      setOpenAddKolektifBookModal(false);
+      setSelectedLinkedKolektifBookId(selectedKolektifBookId);
+      setActiveTab("kolektif");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleUnlink() {
     if (!unlinkingBook) return;
     setSaving(true);
@@ -262,6 +438,35 @@ export default function KolektifPage() {
       await refresh();
       setOpenUnlinkModal(false);
       setUnlinkingBook(null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAddLinkedSub() {
+    if (!selectedLinkedKolektifBookId) return;
+    const name = newLinkedSubName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      await addKolektifSession(selectedLinkedKolektifBookId, name);
+      setNewLinkedSubName("");
+      setOpenAddLinkedSubModal(false);
+      setLinkedKolektifRefreshKey(k => k + 1);
+      await refresh();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUnlinkKolektif() {
+    if (!selectedLinkedKolektifBookId) return;
+    setSaving(true);
+    try {
+      await unlinkBookFromKolektif(selectedLinkedKolektifBookId);
+      await refresh();
+      setOpenUnlinkKolektifModal(false);
+      setActiveTab("sub-buku");
     } finally {
       setSaving(false);
     }
@@ -321,7 +526,7 @@ export default function KolektifPage() {
         <div className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 overflow-x-auto scrollbar-hide">
           <div className="shrink-0">
             <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Total</div>
-            <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">
+            <div className="text-base font-bold text-blue-600 dark:text-blue-400 tabular-nums">
               {formatIDR(grandTotal)}
             </div>
           </div>
@@ -330,22 +535,35 @@ export default function KolektifPage() {
               <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
               <div className="shrink-0">
                 <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                  <span className="normal-case">{kolektifTabLabel || "Sub-buku"}</span> <span className="normal-case">({sessions.length})</span>
+                  {kolektifTabLabel || "Sub-buku"}
                 </div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-white tabular-nums">
+                <div className={`text-sm font-semibold tabular-nums ${subBukuGrandTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : subBukuGrandTotal < 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
                   {formatIDR(subBukuGrandTotal)}
                 </div>
               </div>
             </>
           )}
+          {linkedKolektifBooks.map((b) => (
+            <React.Fragment key={b.id}>
+              <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+              <div className="shrink-0">
+                <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                  {b.name}
+                </div>
+                <div className={`text-sm font-semibold tabular-nums ${(linkedKolektifBookTotals[b.id] ?? 0) > 0 ? "text-emerald-600 dark:text-emerald-400" : (linkedKolektifBookTotals[b.id] ?? 0) < 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
+                  {formatIDR(linkedKolektifBookTotals[b.id] ?? 0)}
+                </div>
+              </div>
+            </React.Fragment>
+          ))}
           {linkedBooks.length > 0 && (
             <>
               <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
               <div className="shrink-0">
                 <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                  Transaksi <span className="normal-case">({linkedBooks.length})</span>
+                  Transaksi
                 </div>
-                <div className="text-sm font-semibold text-slate-900 dark:text-white tabular-nums">
+                <div className={`text-sm font-semibold tabular-nums ${linkedGrandTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : linkedGrandTotal < 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
                   {formatIDR(linkedGrandTotal)}
                 </div>
               </div>
@@ -354,175 +572,233 @@ export default function KolektifPage() {
         </div>
       )}
 
-      {/* ── Tab bar + tombol + di samping kanan ── */}
-      <div className="flex items-center gap-2">
-        <div className="flex rounded-lg border dark:border-slate-700 overflow-hidden">
+      {/* ── Card dengan Tab terintegrasi ── */}
+      <div className="border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-800 flex flex-col flex-1 min-h-0 overflow-hidden">
+        
+        {/* ── Tab bar di dalam card ── */}
+        <div className="flex items-center gap-0 bg-slate-100/60 dark:bg-slate-900/60 px-3 pt-2.5 border-b border-slate-200 dark:border-slate-700">
+          {/* Tab sub-buku */}
           <button
             type="button"
             onClick={() => {
               if (activeTab === "sub-buku") {
-                // Sudah aktif → buka modal rename label tab
                 setRenameKolektifInput(kolektifTabLabel);
                 setOpenRenameKolektifModal(true);
               } else {
                 setActiveTab("sub-buku");
               }
             }}
-            className={`px-3 py-1.5 text-sm font-medium transition ${
-              activeTab === "sub-buku"
-                ? "bg-slate-900 dark:bg-slate-700 text-white"
-                : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-            }`}
             title={activeTab === "sub-buku" ? "Klik untuk ganti nama" : ""}
+            className={`relative px-3.5 text-sm font-medium transition-all rounded-t-lg max-w-[130px] truncate shrink-0 select-none ${
+              activeTab === "sub-buku"
+                ? "bg-white dark:bg-slate-800 border border-b-0 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white pt-2 pb-[calc(0.5rem+1px)] -mb-px z-10"
+                : "py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
+            }`}
           >
             {kolektifTabLabel || "Sub-buku"}
           </button>
-          {linkedBooks.map((b) => (
-            <button
-              key={b.id}
-              type="button"
-              onClick={() => {
-                if (activeTab === "transaksi" && selectedLinkedBookId === b.id) {
-                  // Sudah aktif → buka modal info
-                  setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name);
-                  setOpenLinkedBookModal(true);
-                } else {
-                  setSelectedLinkedBookId(b.id);
-                  setActiveTab("transaksi");
-                }
-              }}
-              className={`px-3 py-1.5 text-sm font-medium transition border-l dark:border-slate-700 max-w-[120px] truncate ${
-                activeTab === "transaksi" && selectedLinkedBookId === b.id
-                  ? "bg-slate-900 dark:bg-slate-700 text-white"
-                  : "bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-              }`}
-              title={activeTab === "transaksi" && selectedLinkedBookId === b.id ? `${linkedBookTabLabels[b.id] ?? b.name} — klik untuk info` : (linkedBookTabLabels[b.id] ?? b.name)}
-            >
-              {linkedBookTabLabels[b.id] ?? b.name}
-            </button>
-          ))}
-        </div>
 
-        {/* Tombol + di samping tab */}
-        {userCanEdit && (
-          <button
-            type="button"
-            onClick={openAddBookModalFn}
-            title="Tambah buku transaksi"
-            className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 text-lg font-light leading-none"
-          >
-            +
-          </button>
-        )}
-      </div>
+          {/* Tab linked kolektif books */}
+          {linkedKolektifBooks.map((b) => {
+            const isActive = activeTab === "kolektif" && selectedLinkedKolektifBookId === b.id;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  if (isActive) {
+                    setOpenLinkedKolektifModal(true);
+                  } else {
+                    setSelectedLinkedKolektifBookId(b.id);
+                    setActiveTab("kolektif");
+                  }
+                }}
+                title={isActive
+                  ? `${linkedKolektifTabLabels[b.id] ?? b.name} — klik untuk info`
+                  : (linkedKolektifTabLabels[b.id] ?? b.name)}
+                className={`relative px-3.5 text-sm font-medium transition-all rounded-t-lg max-w-[130px] truncate shrink-0 select-none ${
+                  isActive
+                    ? "bg-white dark:bg-slate-800 border border-b-0 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white pt-2 pb-[calc(0.5rem+1px)] -mb-px z-10"
+                    : "py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                }`}
+              >
+                {linkedKolektifTabLabels[b.id] ?? b.name}
+              </button>
+            );
+          })}
 
-      {/* ── Tab: Sub-buku ── */}
-      {activeTab === "sub-buku" && (
-        <div ref={subBukuListRef} className="relative flex flex-col gap-3 flex-1 min-h-0 pb-16 overflow-y-auto">
-          {sessions.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-6 py-12 text-center">
-              <div className="text-slate-400 dark:text-slate-500 text-sm">
-                Belum ada sub-buku.
-                {userCanEdit ? ' Klik tombol + di kanan bawah untuk menambahkan.' : ""}
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden overflow-y-auto max-h-[55vh]">
-              {sessions.map((session, idx) => (
-                <div
-                  key={session.id}
-                  className={`group flex items-center justify-between gap-3 bg-white dark:bg-slate-800 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 ${
-                    idx !== 0 ? "border-t border-slate-100 dark:border-slate-700" : ""
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      navigate(`/buku-kas-kolektif/${safeBookId}/sesi/${session.id}`)
-                    }
-                    className="flex items-center gap-3 min-w-0 flex-1 text-left"
-                  >
-                    <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0">
-                      {idx + 1}.
-                    </span>
-                    <span className="font-medium text-slate-900 dark:text-white truncate">
-                      {session.name}
-                    </span>
-                    <span className="text-sm text-emerald-600 dark:text-emerald-400 ml-auto shrink-0">
-                      {formatIDR(sessionTotals[session.id] ?? 0)}
-                    </span>
-                  </button>
-                  {userCanEdit && (
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRenamingSession(session);
-                          setRenameInput(session.name);
-                          setOpenRenameModal(true);
-                        }}
-                        className="rounded p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
-                        title="Rename"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDeletingSession(session);
-                          setOpenDeleteModal(true);
-                        }}
-                        className="rounded p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                        title="Hapus"
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Tab linked transaksi books */}
+          {linkedBooks.map((b) => {
+            const isActive = activeTab === "transaksi" && selectedLinkedBookId === b.id;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  if (isActive) {
+                    setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name);
+                    setOpenLinkedBookModal(true);
+                  } else {
+                    setSelectedLinkedBookId(b.id);
+                    setActiveTab("transaksi");
+                  }
+                }}
+                title={isActive ? `${linkedBookTabLabels[b.id] ?? b.name} — klik untuk info` : (linkedBookTabLabels[b.id] ?? b.name)}
+                className={`relative px-3.5 text-sm font-medium transition-all rounded-t-lg max-w-[130px] truncate shrink-0 select-none ${
+                  isActive
+                    ? "bg-white dark:bg-slate-800 border border-b-0 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white pt-2 pb-[calc(0.5rem+1px)] -mb-px z-10"
+                    : "py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                }`}
+              >
+                {linkedBookTabLabels[b.id] ?? b.name}
+              </button>
+            );
+          })}
 
-          {/* FAB Tombol + Sub-buku */}
+          {/* Tombol + di sebelah kanan tab terakhir */}
           {userCanEdit && (
             <button
               type="button"
-              onClick={() => { setNewName(""); setOpenAddModal(true); }}
-              className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 md:bottom-6 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 transition active:scale-95"
-              title="Tambah Sub-buku"
+              onClick={() => setOpenAddTypeModal(true)}
+              title="Tambah tab buku"
+              className="ml-1.5 self-center flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600 shrink-0 transition"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8">
-                <path d="M5 12h14" />
-                <path d="M12 5v14" />
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                <path d="M5 12h14"/><path d="M12 5v14"/>
               </svg>
             </button>
           )}
         </div>
-      )}
 
-      {/* ── Tab: Buku Transaksi ── */}
-      {activeTab === "transaksi" && (
-        <div className="flex flex-col gap-3 flex-1 min-h-0">
-          {linkedBooks.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-6 py-12 text-center">
-              <div className="text-slate-400 dark:text-slate-500 text-sm">
-                Belum ada buku transaksi.
-                {userCanEdit ? ' Klik "+" untuk menambahkan.' : ""}
+        {/* ── Konten Tab ── */}
+        <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
+
+        {/* Tab: Sub-buku */}
+        {activeTab === "sub-buku" && (
+          <div ref={subBukuListRef} className="relative flex flex-col gap-3 flex-1 min-h-0 pb-16 overflow-y-auto p-4">
+            {sessions.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-slate-400 dark:text-slate-500 text-sm">
+                  Belum ada sub-buku.
+                  {userCanEdit ? ' Klik tombol + di kanan bawah untuk menambahkan.' : ""}
+                </div>
               </div>
-            </div>
-          ) : selectedLinkedBookId ? (
-            <TransactionsPage key={selectedLinkedBookId} bookId={selectedLinkedBookId} mode="semua" />
-          ) : null}
+            ) : (
+              <div className="rounded-lg overflow-y-auto max-h-[55vh]">
+                {sessions.map((session, idx) => (
+                  <div
+                    key={session.id}
+                    className={`group flex items-center justify-between gap-3 bg-white dark:bg-slate-800 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-700/50 ${
+                      idx !== 0 ? "border-t border-slate-100 dark:border-slate-700" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        navigate(`/buku-kas-kolektif/${safeBookId}/sesi/${session.id}`)
+                      }
+                      className="flex items-center gap-3 min-w-0 flex-1 text-left"
+                    >
+                      <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0">
+                        {idx + 1}.
+                      </span>
+                      <span className="font-medium text-slate-900 dark:text-white truncate">
+                        {session.name}
+                      </span>
+                      <span className="text-sm text-emerald-600 dark:text-emerald-400 ml-auto shrink-0">
+                        {formatIDR(sessionTotals[session.id] ?? 0)}
+                      </span>
+                    </button>
+                    {userCanEdit && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenamingSession(session);
+                            setRenameInput(session.name);
+                            setOpenRenameModal(true);
+                          }}
+                          className="rounded p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+                          title="Rename"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
+                          </svg>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDeletingSession(session);
+                            setOpenDeleteModal(true);
+                          }}
+                          className="rounded p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                          title="Hapus"
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                            <path d="M3 6h18" />
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* FAB Tombol + Sub-buku */}
+            {userCanEdit && (
+              <button
+                type="button"
+                onClick={() => { setNewName(""); setOpenAddModal(true); }}
+                className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 md:bottom-6 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 transition active:scale-95"
+                title="Tambah Sub-buku"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8">
+                  <path d="M5 12h14" />
+                  <path d="M12 5v14" />
+                </svg>
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Tab: Buku Transaksi */}
+        {activeTab === "transaksi" && (
+          <div className="flex flex-col gap-3 flex-1 min-h-0 p-4">
+            {linkedBooks.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-slate-400 dark:text-slate-500 text-sm">
+                  Belum ada buku transaksi.
+                  {userCanEdit ? ' Klik "+" untuk menambahkan.' : ""}
+                </div>
+              </div>
+            ) : selectedLinkedBookId ? (
+              <TransactionsPage key={selectedLinkedBookId} bookId={selectedLinkedBookId} mode="semua" />
+            ) : null}
+          </div>
+        )}
+
+        {/* Tab: Buku Kolektif (linked) */}
+        {activeTab === "kolektif" && (
+          <div className="flex flex-col gap-3 flex-1 min-h-0 p-4 overflow-y-auto">
+            {linkedKolektifBooks.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-slate-400 dark:text-slate-500 text-sm">
+                  Belum ada buku kolektif.
+                  {userCanEdit ? ' Klik "+" untuk menambahkan.' : ""}
+                </div>
+              </div>
+            ) : selectedLinkedKolektifBookId ? (
+              <LinkedKolektifView key={`${selectedLinkedKolektifBookId}-${linkedKolektifRefreshKey}`} bookId={selectedLinkedKolektifBookId} />
+            ) : null}
+          </div>
+        )}
+
         </div>
-      )}
+      </div>
 
       {/* Modal tambah sub-buku */}
       <Modal open={openAddModal} title="Tambah Sub-buku" onClose={() => setOpenAddModal(false)}>
@@ -591,6 +867,85 @@ export default function KolektifPage() {
             >
               {saving ? "Menghapus..." : "Hapus"}
             </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal pilih tipe buku yang akan ditambah */}
+      <Modal open={openAddTypeModal} title="Tambah Tab Buku" onClose={() => setOpenAddTypeModal(false)}>
+        <div className="grid gap-3">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Pilih jenis buku yang ingin dihubungkan:</p>
+          <button
+            type="button"
+            onClick={() => { setOpenAddTypeModal(false); openAddBookModalFn(); }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Buku Transaksi</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan tabel transaksi masuk/keluar</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setOpenAddTypeModal(false); openAddKolektifBookModalFn(); }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Buku Kolektif</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan daftar sub-buku kolektif</div>
+            </div>
+          </button>
+        </div>
+      </Modal>
+
+      {/* Modal tambah buku kolektif */}
+      <Modal open={openAddKolektifBookModal} title="Tambah Buku Kolektif" onClose={() => setOpenAddKolektifBookModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Pilih buku kolektif yang sudah dibuat untuk dihubungkan ke sini.
+          </p>
+          {availableKolektifBooks.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-4 py-6 text-center text-sm text-slate-400">
+              Tidak ada buku kolektif yang tersedia.
+            </div>
+          ) : (
+            <div className="grid gap-2 max-h-64 overflow-auto">
+              {availableKolektifBooks.map((b) => (
+                <label
+                  key={b.id}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition ${
+                    selectedKolektifBookId === b.id
+                      ? "border-slate-900 bg-slate-50 dark:border-slate-400 dark:bg-slate-700"
+                      : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="linked-kolektif-book"
+                    value={b.id}
+                    checked={selectedKolektifBookId === b.id}
+                    onChange={() => setSelectedKolektifBookId(b.id)}
+                    className="h-4 w-4 accent-slate-900"
+                  />
+                  <span className="text-sm font-medium text-slate-900 dark:text-white">{b.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenAddKolektifBookModal(false)}>Batal</Button>
+            <Button
+              onClick={handleLinkKolektifBook}
+              disabled={!selectedKolektifBookId || availableKolektifBooks.length === 0 || saving}
+            >
+              {saving ? "Menghubungkan..." : "Hubungkan"}
+            </Button>
           </div>
         </div>
       </Modal>
@@ -751,6 +1106,110 @@ export default function KolektifPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Modal info buku kolektif yang di-link (klik tab aktif) */}
+      <Modal
+        open={openLinkedKolektifModal}
+        title={linkedKolektifBooks.find((b) => b.id === selectedLinkedKolektifBookId)?.name ?? "Buku Kolektif"}
+        onClose={() => setOpenLinkedKolektifModal(false)}
+      >
+        <div className="grid gap-4">
+          {userCanEdit && (
+            <button
+              type="button"
+              onClick={() => {
+                setNewLinkedSubName("");
+                setOpenLinkedKolektifModal(false);
+                setTimeout(() => setOpenAddLinkedSubModal(true), 150);
+              }}
+              className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            >
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 text-xl font-light">+</div>
+              <span className="text-sm font-medium text-slate-900 dark:text-white">Tambah Sub-buku</span>
+            </button>
+          )}
+          {/* HIDDEN: Tombol buka halaman lengkap — disembunyikan, jangan dihapus
+          <button
+            type="button"
+            onClick={() => {
+              setOpenLinkedKolektifModal(false);
+              navigate(`/buku-kas-kolektif/${selectedLinkedKolektifBookId}`, { state: { autoTab: true } });
+            }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+            </div>
+            <span className="text-sm font-medium text-slate-900 dark:text-white">Buka halaman lengkap</span>
+          </button>
+          */}
+          {userCanEdit && (
+            <div className="flex justify-between items-center pt-1 border-t dark:border-slate-700">
+              <span className="text-xs text-slate-400">Terhubung ke buku kolektif ini</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenLinkedKolektifModal(false);
+                  setTimeout(() => setOpenUnlinkKolektifModal(true), 150);
+                }}
+                className="text-sm text-rose-500 hover:text-rose-700 font-medium"
+              >
+                Lepas dari kolektif
+              </button>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setOpenLinkedKolektifModal(false)}>Tutup</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal tambah sub-buku untuk linked kolektif book */}
+      <Modal open={openAddLinkedSubModal} title="Tambah Sub-buku" onClose={() => setOpenAddLinkedSubModal(false)}>
+        <div className="grid gap-4">
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Nama Sub-buku</div>
+            <Input
+              placeholder="Contoh: Rabu, Kamis, Minggu 1..."
+              value={newLinkedSubName}
+              onChange={(e) => setNewLinkedSubName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleAddLinkedSub()}
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenAddLinkedSubModal(false)}>Batal</Button>
+            <Button onClick={handleAddLinkedSub} disabled={!newLinkedSubName.trim() || saving}>
+              {saving ? "Menyimpan..." : "Tambah"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal konfirmasi unlink buku kolektif */}
+      <Modal open={openUnlinkKolektifModal} title="Lepas Buku Kolektif" onClose={() => setOpenUnlinkKolektifModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Lepas buku{" "}
+            <span className="font-semibold text-slate-900 dark:text-white">
+              "{linkedKolektifBooks.find((b) => b.id === selectedLinkedKolektifBookId)?.name}"
+            </span>{" "}
+            dari buku kolektif ini? Data sub-buku tidak akan terhapus.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenUnlinkKolektifModal(false)}>Batal</Button>
+            <button
+              type="button"
+              onClick={handleUnlinkKolektif}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {saving ? "Melepas..." : "Lepas"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Modal rename label tab kolektif */}
       <Modal
         open={openRenameKolektifModal}
