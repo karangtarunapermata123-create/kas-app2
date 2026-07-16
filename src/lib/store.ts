@@ -152,6 +152,7 @@ export async function getKolektifConfig(
       headerValue: rowData.header_value ?? undefined,
       noteValue: rowData.note_value ?? undefined,
       note: r.note ?? undefined,
+      txType: (rowData.tx_type === "keluar" ? "keluar" : "masuk") as "masuk" | "keluar",
     };
   });
   
@@ -228,6 +229,7 @@ export async function addKolektifRow(
   note?: string,
   headerValue?: number,
   noteValue?: number,
+  txType?: "masuk" | "keluar",
 ): Promise<void> {
   const { data: existing } = await supabase
     .from("kolektif_rows")
@@ -237,7 +239,6 @@ export async function addKolektifRow(
     .limit(1);
   const nextOrder = (existing?.[0]?.sort_order ?? 0) + 1;
   
-  // Build basic row data (always works)
   const rowData: any = {
     id: uid("kr"),
     session_id: sessionId,
@@ -246,13 +247,12 @@ export async function addKolektifRow(
     amount,
     note: note ?? null,
     sort_order: nextOrder,
+    tx_type: txType ?? "masuk",
   };
   
-  // Try to insert with basic data first
   const { error: basicError } = await supabase.from("kolektif_rows").insert(rowData);
   if (basicError) throw basicError;
   
-  // If we have numeric values, try to update them (will work if migration has been run)
   if (headerValue || noteValue) {
     const updateData: any = {};
     if (headerValue) updateData.header_value = headerValue;
@@ -263,7 +263,6 @@ export async function addKolektifRow(
         .from("kolektif_rows")
         .update(updateData)
         .eq("id", rowData.id);
-      // Ignore error if columns don't exist yet
       if (updateError) {
         const errMsg = (updateError as any)?.message ?? "";
         if (!errMsg.includes("column") && !errMsg.includes("does not exist")) {
@@ -281,11 +280,13 @@ export async function updateKolektifRow(
   note?: string,
   headerValue?: number,
   noteValue?: number,
+  txType?: "masuk" | "keluar",
 ): Promise<void> {
   const update: Record<string, unknown> = {
     label: label.trim(),
     amount,
     note: note ?? null,
+    tx_type: txType ?? "masuk",
   };
   if (headerValue !== undefined) update.header_value = headerValue;
   if (noteValue !== undefined) update.note_value = noteValue;
@@ -297,7 +298,6 @@ export async function updateKolektifRow(
       .eq("id", rowId);
     if (error) throw error;
   } catch (error) {
-    // If update fails due to missing columns, try without the numeric columns
     const basicUpdate: Record<string, unknown> = {
       label: label.trim(),
       amount,
@@ -345,6 +345,23 @@ export async function getKolektifLinkedKolektifBooks(kolektifBookId: string): Pr
     .select("*")
     .eq("group_id", kolektifBookId)
     .eq("type", "kolektif");
+  if (error) throw error;
+  return (data ?? []).map((b) => ({
+    id: b.id,
+    name: b.name,
+    type: b.type as Book["type"],
+    groupId: b.group_id ?? null,
+    tabLabel: (b as any).tab_label ?? null,
+  }));
+}
+
+// Buku rutinan (type=rutin) yang di-link ke buku kolektif ini menggunakan group_id
+export async function getKolektifLinkedRoutineBooks(kolektifBookId: string): Promise<Book[]> {
+  const { data, error } = await supabase
+    .from("books")
+    .select("*")
+    .eq("group_id", kolektifBookId)
+    .eq("type", "rutin");
   if (error) throw error;
   return (data ?? []).map((b) => ({
     id: b.id,

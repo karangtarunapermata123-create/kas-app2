@@ -63,8 +63,9 @@ const MONTH_NAMES = [
   "Des",
 ];
 
-export default function RoutineBookPage() {
-  const { bookId } = useParams<{ bookId: string }>();
+export default function RoutineBookPage({ bookId: bookIdProp }: { bookId?: string } = {}) {
+  const { bookId: bookIdParam } = useParams<{ bookId: string }>();
+  const bookId = bookIdProp ?? bookIdParam;
   const { profile } = useAuth();
   const navigate = useNavigate();
   const [userCanEdit, setUserCanEdit] = useState(false);

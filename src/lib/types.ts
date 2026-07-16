@@ -24,6 +24,7 @@ export type KolektifRow = {
   headerValue?: number;
   noteValue?: number;
   note?: string;
+  txType?: "masuk" | "keluar"; // hanya relevan saat nominalLabelType === "number"
 };
 
 export type KolektifColumnType = "text" | "number";

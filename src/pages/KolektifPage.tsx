@@ -4,6 +4,7 @@ import Button from "../components/Button";
 import Input from "../components/Input";
 import Modal from "../components/Modal";
 import TransactionsPage from "./TransactionsPage";
+import RoutineBookPage from "./RoutineBookPage";
 import { useAuth, canEditBook } from "../lib/auth";
 import {
   getKolektifSessions,
@@ -15,13 +16,20 @@ import {
   getTransactions,
   getKolektifLinkedBooks,
   getKolektifLinkedKolektifBooks,
+  getKolektifLinkedRoutineBooks,
   linkBookToKolektif,
   unlinkBookFromKolektif,
   renameBook,
   saveBookTabLabel,
+  getBookSaldo,
 } from "../lib/store";
 import { formatIDR } from "../lib/money";
 import type { Book, KolektifSession } from "../lib/types";
+
+// Komponen untuk render buku rutinan yang di-link
+function LinkedRoutineView({ bookId }: { bookId: string }) {
+  return <RoutineBookPage bookId={bookId} />;
+}
 
 // Komponen untuk render sub-buku list dari buku kolektif yang di-link
 function LinkedKolektifView({ bookId }: { bookId: string }) {
@@ -100,8 +108,8 @@ export default function KolektifPage() {
     canEditBook(profile, safeBookId).then(setUserCanEdit);
   }, [profile, safeBookId]);
 
-  // Tab state: "sub-buku" | "transaksi" | "kolektif"
-  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif">("sub-buku");
+  // Tab state: "sub-buku" | "transaksi" | "kolektif" | "rutinan"
+  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif" | "rutinan">("sub-buku");
   const [selectedLinkedBookId, setSelectedLinkedBookId] = useState<string | null>(null);
   const [selectedLinkedKolektifBookId, setSelectedLinkedKolektifBookId] = useState<string | null>(null);
 
@@ -119,6 +127,8 @@ export default function KolektifPage() {
 
   // State untuk field ganti label tab buku transaksi di modal info
   const [renameLinkedTabInput, setRenameLinkedTabInput] = useState("");
+  // State untuk field ganti label tab buku rutinan di modal info
+  const [renameLinkedRoutineTabInput, setRenameLinkedRoutineTabInput] = useState("");
 
   const [sessions, setSessions] = useState<KolektifSession[]>([]);
   const [sessionTotals, setSessionTotals] = useState<Record<string, number>>({});
@@ -145,6 +155,19 @@ export default function KolektifPage() {
   // Counter untuk force-remount LinkedKolektifView setelah tambah sub-buku
   const [linkedKolektifRefreshKey, setLinkedKolektifRefreshKey] = useState(0);
 
+  // Linked routine books
+  const [linkedRoutineBooks, setLinkedRoutineBooks] = useState<Book[]>([]);
+  const [linkedRoutineTabLabels, setLinkedRoutineTabLabels] = useState<Record<string, string>>({});
+  const [linkedRoutineBookTotals, setLinkedRoutineBookTotals] = useState<Record<string, number>>({});
+  const [selectedLinkedRoutineBookId, setSelectedLinkedRoutineBookId] = useState<string | null>(null);
+  // Modal info/aksi buku rutinan yang di-link
+  const [openLinkedRoutineModal, setOpenLinkedRoutineModal] = useState(false);
+  // Modal unlink buku rutinan
+  const [openUnlinkRoutineModal, setOpenUnlinkRoutineModal] = useState(false);
+  // Modal tambah buku rutinan
+  const [openAddRoutineBookModal, setOpenAddRoutineBookModal] = useState(false);
+  const [availableRoutineBooks, setAvailableRoutineBooks] = useState<Book[]>([]);
+  const [selectedRoutineBookId, setSelectedRoutineBookId] = useState<string>("");
   // Modal tambah sub-buku
   const [openAddModal, setOpenAddModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -176,15 +199,17 @@ export default function KolektifPage() {
   const [saving, setSaving] = useState(false);
 
   const refresh = async () => {
-    const [list, linked, linkedKolektif, allBooks] = await Promise.all([
+    const [list, linked, linkedKolektif, linkedRoutine, allBooks] = await Promise.all([
       getKolektifSessions(safeBookId),
       getKolektifLinkedBooks(safeBookId),
       getKolektifLinkedKolektifBooks(safeBookId),
+      getKolektifLinkedRoutineBooks(safeBookId),
       getBooks(),
     ]);
     setSessions(list);
     setLinkedBooks(linked);
     setLinkedKolektifBooks(linkedKolektif);
+    setLinkedRoutineBooks(linkedRoutine);
     // Ambil nama buku kolektif ini
     const thisBook = allBooks.find((b) => b.id === safeBookId);
     if (thisBook) {
@@ -203,6 +228,13 @@ export default function KolektifPage() {
       kolektifTabLabelMap[b.id] = b.tabLabel || b.name;
     }
     setLinkedKolektifTabLabels(kolektifTabLabelMap);
+
+    // Set label tab per linked routine book
+    const routineTabLabelMap: Record<string, string> = {};
+    for (const b of linkedRoutine) {
+      routineTabLabelMap[b.id] = b.tabLabel || b.name;
+    }
+    setLinkedRoutineTabLabels(routineTabLabelMap);
 
     // Load total per session
     const totals: Record<string, number> = {};
@@ -261,6 +293,15 @@ export default function KolektifPage() {
     );
     setLinkedKolektifBookTotals(kolektifBookTotals);
 
+    // Load total per linked routine book
+    const routineBookTotals: Record<string, number> = {};
+    await Promise.all(
+      linkedRoutine.map(async (b) => {
+        routineBookTotals[b.id] = await getBookSaldo(b);
+      }),
+    );
+    setLinkedRoutineBookTotals(routineBookTotals);
+
     // Set selected linked book jika belum ada
     setSelectedLinkedBookId((prev) => {
       if (prev && linked.some((b) => b.id === prev)) return prev;
@@ -271,8 +312,13 @@ export default function KolektifPage() {
       if (prev && linkedKolektif.some((b) => b.id === prev)) return prev;
       return linkedKolektif[0]?.id ?? null;
     });
+    // Set selected linked routine book jika belum ada
+    setSelectedLinkedRoutineBookId((prev) => {
+      if (prev && linkedRoutine.some((b) => b.id === prev)) return prev;
+      return linkedRoutine[0]?.id ?? null;
+    });
 
-    return { list, linked, linkedKolektif };
+    return { list, linked, linkedKolektif, linkedRoutine };
   };
 
   useEffect(() => {
@@ -280,13 +326,16 @@ export default function KolektifPage() {
     setLoading(true);
     refresh().then((data) => {
       if (autoTab && data) {
-        const { linked, linkedKolektif, list } = data;
+        const { linked, linkedKolektif, linkedRoutine, list } = data;
         if (linked.length > 0) {
           setSelectedLinkedBookId(linked[0].id);
           setActiveTab("transaksi");
         } else if (linkedKolektif.length > 0) {
           setSelectedLinkedKolektifBookId(linkedKolektif[0].id);
           setActiveTab("kolektif");
+        } else if (linkedRoutine.length > 0) {
+          setSelectedLinkedRoutineBookId(linkedRoutine[0].id);
+          setActiveTab("rutinan");
         } else if (list.length > 0) {
           setActiveTab("sub-buku");
         }
@@ -316,9 +365,54 @@ export default function KolektifPage() {
     (sum, b) => sum + (linkedKolektifBookTotals[b.id] ?? 0),
     0,
   );
-  const grandTotal = subBukuGrandTotal + linkedGrandTotal + linkedKolektifGrandTotal;
+  const linkedRoutineGrandTotal = linkedRoutineBooks.reduce(
+    (sum, b) => sum + (linkedRoutineBookTotals[b.id] ?? 0),
+    0,
+  );
+  const grandTotal = subBukuGrandTotal + linkedGrandTotal + linkedKolektifGrandTotal + linkedRoutineGrandTotal;
 
-  // ── Sub-buku handlers ────────────────────────────────────────────────────
+  // ── Routine book handlers ────────────────────────────────────────────────
+
+  async function openAddRoutineBookModalFn() {
+    const all = await getBooks();
+    const linkedIds = new Set(linkedRoutineBooks.map((b) => b.id));
+    const kolektifIds = new Set(all.filter((b) => b.type === "kolektif").map((b) => b.id));
+    const candidates = all.filter(
+      (b) =>
+        b.type === "rutin" &&
+        !linkedIds.has(b.id) &&
+        !(b.groupId && kolektifIds.has(b.groupId)),
+    );
+    setAvailableRoutineBooks(candidates);
+    setSelectedRoutineBookId(candidates[0]?.id ?? "");
+    setOpenAddRoutineBookModal(true);
+  }
+
+  async function handleLinkRoutineBook() {
+    if (!selectedRoutineBookId) return;
+    setSaving(true);
+    try {
+      await linkBookToKolektif(selectedRoutineBookId, safeBookId);
+      await refresh();
+      setOpenAddRoutineBookModal(false);
+      setSelectedLinkedRoutineBookId(selectedRoutineBookId);
+      setActiveTab("rutinan");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUnlinkRoutine() {
+    if (!selectedLinkedRoutineBookId) return;
+    setSaving(true);
+    try {
+      await unlinkBookFromKolektif(selectedLinkedRoutineBookId);
+      await refresh();
+      setOpenUnlinkRoutineModal(false);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function handleAdd() {
     const name = newName.trim();
@@ -499,6 +593,20 @@ export default function KolektifPage() {
     }
   }
 
+  async function handleRenameRoutineTab() {
+    if (!selectedLinkedRoutineBookId) return;
+    const name = renameLinkedRoutineTabInput.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      await saveBookTabLabel(selectedLinkedRoutineBookId, name);
+      setLinkedRoutineTabLabels((prev) => ({ ...prev, [selectedLinkedRoutineBookId]: name }));
+      setOpenLinkedRoutineModal(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
@@ -521,9 +629,9 @@ export default function KolektifPage() {
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0">
 
-      {/* ── Card Total — compact strip ── */}
+      {/* ── Card Total — compact strip, sticky ── */}
       {hasAny && (
-        <div className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 overflow-x-auto scrollbar-hide">
+        <div className="sticky top-0 z-20 flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 overflow-x-auto scrollbar-hide shadow-sm">
           <div className="shrink-0">
             <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Total</div>
             <div className="text-base font-bold text-blue-600 dark:text-blue-400 tabular-nums">
@@ -552,6 +660,19 @@ export default function KolektifPage() {
                 </div>
                 <div className={`text-sm font-semibold tabular-nums ${(linkedKolektifBookTotals[b.id] ?? 0) > 0 ? "text-emerald-600 dark:text-emerald-400" : (linkedKolektifBookTotals[b.id] ?? 0) < 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
                   {formatIDR(linkedKolektifBookTotals[b.id] ?? 0)}
+                </div>
+              </div>
+            </React.Fragment>
+          ))}
+          {linkedRoutineBooks.map((b) => (
+            <React.Fragment key={b.id}>
+              <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+              <div className="shrink-0">
+                <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                  {linkedRoutineTabLabels[b.id] ?? b.name}
+                </div>
+                <div className={`text-sm font-semibold tabular-nums ${(linkedRoutineBookTotals[b.id] ?? 0) > 0 ? "text-emerald-600 dark:text-emerald-400" : (linkedRoutineBookTotals[b.id] ?? 0) < 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-900 dark:text-white"}`}>
+                  {formatIDR(linkedRoutineBookTotals[b.id] ?? 0)}
                 </div>
               </div>
             </React.Fragment>
@@ -625,6 +746,36 @@ export default function KolektifPage() {
                 }`}
               >
                 {linkedKolektifTabLabels[b.id] ?? b.name}
+              </button>
+            );
+          })}
+
+          {/* Tab linked rutinan books */}
+          {linkedRoutineBooks.map((b) => {
+            const isActive = activeTab === "rutinan" && selectedLinkedRoutineBookId === b.id;
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => {
+                  if (isActive) {
+                    setRenameLinkedRoutineTabInput(linkedRoutineTabLabels[b.id] ?? b.name);
+                    setOpenLinkedRoutineModal(true);
+                  } else {
+                    setSelectedLinkedRoutineBookId(b.id);
+                    setActiveTab("rutinan");
+                  }
+                }}
+                title={isActive
+                  ? `${linkedRoutineTabLabels[b.id] ?? b.name} — klik untuk info`
+                  : (linkedRoutineTabLabels[b.id] ?? b.name)}
+                className={`relative px-3.5 text-sm font-medium transition-all rounded-t-lg max-w-[130px] truncate shrink-0 select-none ${
+                  isActive
+                    ? "bg-white dark:bg-slate-800 border border-b-0 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white pt-2 pb-[calc(0.5rem+1px)] -mb-px z-10"
+                    : "py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                }`}
+              >
+                {linkedRoutineTabLabels[b.id] ?? b.name}
               </button>
             );
           })}
@@ -769,7 +920,7 @@ export default function KolektifPage() {
 
         {/* Tab: Buku Transaksi */}
         {activeTab === "transaksi" && (
-          <div className="flex flex-col gap-3 flex-1 min-h-0 p-4">
+          <div className="flex flex-col flex-1 min-h-0 overflow-hidden p-4">
             {linkedBooks.length === 0 ? (
               <div className="px-6 py-12 text-center">
                 <div className="text-slate-400 dark:text-slate-500 text-sm">
@@ -778,7 +929,7 @@ export default function KolektifPage() {
                 </div>
               </div>
             ) : selectedLinkedBookId ? (
-              <TransactionsPage key={selectedLinkedBookId} bookId={selectedLinkedBookId} mode="semua" />
+              <TransactionsPage key={selectedLinkedBookId} bookId={selectedLinkedBookId} mode="semua" embedded={true} />
             ) : null}
           </div>
         )}
@@ -795,6 +946,22 @@ export default function KolektifPage() {
               </div>
             ) : selectedLinkedKolektifBookId ? (
               <LinkedKolektifView key={`${selectedLinkedKolektifBookId}-${linkedKolektifRefreshKey}`} bookId={selectedLinkedKolektifBookId} />
+            ) : null}
+          </div>
+        )}
+
+        {/* Tab: Buku Rutinan (linked) */}
+        {activeTab === "rutinan" && (
+          <div className="flex flex-col gap-3 flex-1 min-h-0 p-4 overflow-y-auto">
+            {linkedRoutineBooks.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-slate-400 dark:text-slate-500 text-sm">
+                  Belum ada buku rutinan.
+                  {userCanEdit ? ' Klik "+" untuk menambahkan.' : ""}
+                </div>
+              </div>
+            ) : selectedLinkedRoutineBookId ? (
+              <LinkedRoutineView key={selectedLinkedRoutineBookId} bookId={selectedLinkedRoutineBookId} />
             ) : null}
           </div>
         )}
@@ -901,6 +1068,19 @@ export default function KolektifPage() {
             <div>
               <div className="text-sm font-medium text-slate-900 dark:text-white">Buku Kolektif</div>
               <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan daftar sub-buku kolektif</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setOpenAddTypeModal(false); openAddRoutineBookModalFn(); }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Buku Rutinan</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan link ke buku rutinan</div>
             </div>
           </button>
         </div>
@@ -1203,6 +1383,129 @@ export default function KolektifPage() {
             <button
               type="button"
               onClick={handleUnlinkKolektif}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {saving ? "Melepas..." : "Lepas"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal tambah buku rutinan */}
+      <Modal open={openAddRoutineBookModal} title="Tambah Buku Rutinan" onClose={() => setOpenAddRoutineBookModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Pilih buku rutinan yang sudah dibuat untuk dihubungkan ke sini.
+          </p>
+          {availableRoutineBooks.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-4 py-6 text-center text-sm text-slate-400">
+              Tidak ada buku rutinan yang tersedia.
+              <br />
+              Buat dulu buku rutinan dari halaman Buku Kas.
+            </div>
+          ) : (
+            <div className="grid gap-2 max-h-64 overflow-auto">
+              {availableRoutineBooks.map((b) => (
+                <label
+                  key={b.id}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 transition ${
+                    selectedRoutineBookId === b.id
+                      ? "border-slate-900 bg-slate-50 dark:border-slate-400 dark:bg-slate-700"
+                      : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="linked-routine-book"
+                    value={b.id}
+                    checked={selectedRoutineBookId === b.id}
+                    onChange={() => setSelectedRoutineBookId(b.id)}
+                    className="h-4 w-4 accent-slate-900"
+                  />
+                  <span className="text-sm font-medium text-slate-900 dark:text-white">{b.name}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenAddRoutineBookModal(false)}>Batal</Button>
+            <Button
+              onClick={handleLinkRoutineBook}
+              disabled={!selectedRoutineBookId || availableRoutineBooks.length === 0 || saving}
+            >
+              {saving ? "Menghubungkan..." : "Hubungkan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal info buku rutinan yang di-link */}
+      <Modal
+        open={openLinkedRoutineModal}
+        title={linkedRoutineBooks.find((b) => b.id === selectedLinkedRoutineBookId)?.name ?? "Buku Rutinan"}
+        onClose={() => setOpenLinkedRoutineModal(false)}
+      >
+        <div className="grid gap-4">
+          {/* Ganti label tab */}
+          <div className="grid gap-1.5">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Label Tab</div>
+            <div className="flex gap-2">
+              <Input
+                value={renameLinkedRoutineTabInput}
+                onChange={(e) => setRenameLinkedRoutineTabInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRenameRoutineTab()}
+                placeholder={linkedRoutineBooks.find((b) => b.id === selectedLinkedRoutineBookId)?.name ?? ""}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleRenameRoutineTab}
+                disabled={!renameLinkedRoutineTabInput.trim() || saving}
+              >
+                {saving ? "..." : "Simpan"}
+              </Button>
+            </div>
+            <div className="text-xs text-slate-400">
+              Nama asli: <span className="font-medium text-slate-600 dark:text-slate-300">{linkedRoutineBooks.find((b) => b.id === selectedLinkedRoutineBookId)?.name}</span>
+            </div>
+          </div>
+
+          {userCanEdit && (
+            <div className="flex justify-between items-center pt-1 border-t dark:border-slate-700">
+              <span className="text-xs text-slate-400">Terhubung ke buku kolektif ini</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenLinkedRoutineModal(false);
+                  setTimeout(() => setOpenUnlinkRoutineModal(true), 150);
+                }}
+                className="text-sm text-rose-500 hover:text-rose-700 font-medium"
+              >
+                Lepas dari kolektif
+              </button>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setOpenLinkedRoutineModal(false)}>Tutup</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal konfirmasi unlink buku rutinan */}
+      <Modal open={openUnlinkRoutineModal} title="Lepas Buku Rutinan" onClose={() => setOpenUnlinkRoutineModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Lepas buku{" "}
+            <span className="font-semibold text-slate-900 dark:text-white">
+              "{linkedRoutineBooks.find((b) => b.id === selectedLinkedRoutineBookId)?.name}"
+            </span>{" "}
+            dari buku kolektif ini? Data rutinan tidak akan terhapus.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenUnlinkRoutineModal(false)}>Batal</Button>
+            <button
+              type="button"
+              onClick={handleUnlinkRoutine}
               disabled={saving}
               className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
             >

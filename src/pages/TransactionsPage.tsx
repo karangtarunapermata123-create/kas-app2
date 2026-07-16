@@ -35,6 +35,7 @@ import type { Category, Transaction, TxType, Book } from "../lib/types";
 type Props = {
   bookId: string;
   mode?: "semua" | "rekening";
+  embedded?: boolean;
 };
 
 type FormState = {
@@ -159,7 +160,7 @@ async function compressImageFile(file: File): Promise<File> {
   });
 }
 
-export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
+export default function TransactionsPage({ bookId, mode = "semua", embedded = false }: Props) {
   const location = useLocation();
   const { profile } = useAuth();
   const [userCanEdit, setUserCanEdit] = useState(false);
@@ -213,7 +214,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     return !state?.selectedMonth; // false jika ada selectedMonth dari navigasi
   });
   const [allPage, setAllPage] = useState(0);
-  const ALL_PAGE_SIZE = 15;
+  const [dynamicPageSize, setDynamicPageSize] = useState(15);
+  const ALL_PAGE_SIZE = viewAll ? dynamicPageSize : 15;
 
   // State untuk reverse transfer
   const [openReverseModal, setOpenReverseModal] = useState(false);
@@ -265,7 +267,15 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     const extraGap = 8; // gap antara above dan tabel card
     const available = window.innerHeight - (aboveTop + aboveHeight) - bottomPadding - extraGap;
     const min = 200;
-    setTableMaxHeight(`${Math.max(min, available)}px`);
+    const finalHeight = Math.max(min, available);
+    setTableMaxHeight(`${finalHeight}px`);
+    // Hitung page size dinamis: thead ~36px, row ~48px, pagination bar ~44px
+    const theadHeight = 36;
+    const rowHeight = 48;
+    const paginationHeight = 44;
+    const usable = finalHeight - theadHeight - paginationHeight;
+    const rows = Math.max(5, Math.floor(usable / rowHeight));
+    setDynamicPageSize(rows);
   }, []);
 
   useEffect(() => {
@@ -278,6 +288,13 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       window.removeEventListener("resize", recalcTableHeight);
     };
   }, [recalcTableHeight]);
+
+  // Reset ke halaman terakhir saat page size dinamis berubah (mode Semua)
+  useEffect(() => {
+    if (!viewAll) return;
+    const total = filtered.length;
+    setAllPage(Math.max(0, Math.ceil(total / dynamicPageSize) - 1));
+  }, [dynamicPageSize]);
 
   // Tutup dropdown saat klik di luar
   useEffect(() => {
@@ -1224,7 +1241,7 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       )}
       </div>{/* end aboveTableRef */}
 
-      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 flex flex-col" style={{ minHeight: 0 }}>
+      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 flex flex-col" style={{ minHeight: 0, flex: embedded ? "1 1 0" : undefined }}>
         {displayed.length === 0 ? (
           <div className="px-4 py-6 text-sm text-slate-600">
             {mode === "rekening"
@@ -1235,7 +1252,9 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           <div
             className="w-full min-w-0 overflow-auto"
             style={{
-              maxHeight: tableMaxHeight,
+              maxHeight: embedded ? undefined : tableMaxHeight,
+              flex: embedded ? "1 1 0" : undefined,
+              minHeight: embedded ? 0 : undefined,
             }}
           >
             <table className="w-full text-left text-sm">
