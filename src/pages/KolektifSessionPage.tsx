@@ -189,7 +189,6 @@ export default function KolektifSessionPage() {
       await refresh();
       setOpenDeleteModal(false);
       setDeletingRow(null);
-      setDeleteConfirmText("");
     } finally {
       setSaving(false);
     }
