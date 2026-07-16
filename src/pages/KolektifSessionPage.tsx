@@ -63,7 +63,6 @@ export default function KolektifSessionPage() {
   // Modal hapus
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
   const [deletingRow, setDeletingRow] = useState<KolektifRow | null>(null);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
 
   const [saving, setSaving] = useState(false);
 
@@ -105,8 +104,6 @@ export default function KolektifSessionPage() {
   }
 
   async function saveRow() {
-    if (!confirm("Simpan perubahan baris ini?")) return;
-    
     const amount = Number(rowAmount.replace(/\D/g, "")) || 0;
     const headerValue = Number(rowHeaderValue.replace(/\D/g, "")) || 0;
     const noteValue = Number(rowNoteValue.replace(/\D/g, "")) || 0;
@@ -166,8 +163,6 @@ export default function KolektifSessionPage() {
 
   // ── Header modal ──
   async function saveHeader() {
-    if (!confirm("Simpan perubahan nama dan tipe kolom?")) return;
-    
     setSaving(true);
     try {
       await updateKolektifLabels(safeSessionId, {
@@ -188,7 +183,6 @@ export default function KolektifSessionPage() {
   // ── Delete ──
   async function doDelete() {
     if (!deletingRow) return;
-    if (deleteConfirmText !== "HAPUS") return;
     setSaving(true);
     try {
       await deleteKolektifRow(deletingRow.id);
@@ -245,8 +239,8 @@ export default function KolektifSessionPage() {
 
   return (
     <div className="grid gap-4">
-      {/* Header: total saldo + tombol tambah */}
-      <div className="flex items-center justify-between gap-3">
+      {/* Header: total saldo */}
+      <div className="flex items-center gap-3">
         {config.rows.length > 0 && (
           <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-3 flex items-center gap-4">
             <div>
@@ -267,9 +261,6 @@ export default function KolektifSessionPage() {
               </div>
             </div>
           </div>
-        )}
-        {userCanEdit && (
-          <Button onClick={openAddRow}>+ Tambah</Button>
         )}
       </div>
 
@@ -407,6 +398,21 @@ export default function KolektifSessionPage() {
           </tbody>
         </table>
       </div>
+
+      {/* FAB Tambah Baris */}
+      {userCanEdit && (
+        <button
+          type="button"
+          onClick={openAddRow}
+          className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 md:bottom-6 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 transition active:scale-95"
+          title="Tambah Baris"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+            <path d="M5 12h14" />
+            <path d="M12 5v14" />
+          </svg>
+        </button>
+      )}
 
       {/* Modal tambah/edit baris */}
       <Modal
@@ -598,7 +604,7 @@ export default function KolektifSessionPage() {
       <Modal
         open={openDeleteModal}
         title="Hapus Baris"
-        onClose={() => { setOpenDeleteModal(false); setDeleteConfirmText(""); }}
+        onClose={() => setOpenDeleteModal(false)}
       >
         <div className="grid gap-4">
           <p className="text-sm text-slate-600 dark:text-slate-400">
@@ -608,28 +614,17 @@ export default function KolektifSessionPage() {
             </span>
             ?
           </p>
-          <div>
-            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
-              Ketik <span className="font-bold text-rose-600">HAPUS</span> untuk konfirmasi
-            </div>
-            <input
-              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-rose-600/30"
-              placeholder="Ketik HAPUS"
-              value={deleteConfirmText}
-              onChange={(e) => setDeleteConfirmText(e.target.value)}
-            />
-          </div>
           <div className="flex justify-end gap-2">
             <Button
               variant="secondary"
-              onClick={() => { setOpenDeleteModal(false); setDeleteConfirmText(""); }}
+              onClick={() => setOpenDeleteModal(false)}
             >
               Batal
             </Button>
             <button
               type="button"
               onClick={doDelete}
-              disabled={saving || deleteConfirmText !== "HAPUS"}
+              disabled={saving}
               className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
             >
               {saving ? "Menghapus..." : "Hapus"}

@@ -177,6 +177,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
     return state?.selectedMonth || monthKey(todayISO());
   });
   const [openMonthModal, setOpenMonthModal] = useState(false);
+  const [openViewDropdown, setOpenViewDropdown] = useState(false);
+  const viewDropdownRef = useRef<HTMLDivElement>(null);
   const [pickerYear, setPickerYear] = useState(() => todayISO().slice(0, 4));
   const [pickerMonth, setPickerMonth] = useState(() => todayISO().slice(5, 7));
 
@@ -276,6 +278,18 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
       window.removeEventListener("resize", recalcTableHeight);
     };
   }, [recalcTableHeight]);
+
+  // Tutup dropdown saat klik di luar
+  useEffect(() => {
+    if (!openViewDropdown) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (viewDropdownRef.current && !viewDropdownRef.current.contains(e.target as Node)) {
+        setOpenViewDropdown(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [openViewDropdown]);
 
   // Recalc juga saat mode/filter berubah (tinggi elemen above berubah)
   useEffect(() => {
@@ -1066,25 +1080,52 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
         /* Mode normal: tab + search + export dalam satu baris */
         <div className="mb-3 flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            {/* Dropdown Semua / Per Bulan */}
-            <div className="shrink-0">
-              <Select
-                value={viewAll ? "semua" : "bulan"}
-                onChange={(e) => {
-                  const isViewAll = e.target.value === "semua";
-                  setViewAll(isViewAll);
-                  if (isViewAll) {
-                    const total = (mode === "rekening"
-                      ? transactions.filter((t) => t.masukKeRekening)
-                      : transactions).length;
-                    setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
-                  }
-                }}
-                className="py-1.5"
+            {/* Tombol Semua / Per Bulan → dropdown popup */}
+            <div ref={viewDropdownRef} className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setOpenViewDropdown((v) => !v)}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-3 py-1.5 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
               >
-                <option value="semua">Semua</option>
-                <option value="bulan">Per Bulan</option>
-              </Select>
+                {viewAll ? "Semua" : "Per Bulan"}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-3.5 w-3.5 text-slate-400 transition-transform ${openViewDropdown ? 'rotate-180' : ''}`}>
+                  <path d="m6 9 6 6 6-6"/>
+                </svg>
+              </button>
+              {openViewDropdown && (
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[130px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden">
+                  {[
+                    { value: "semua", label: "Semua" },
+                    { value: "bulan", label: "Per Bulan" },
+                  ].map((opt) => {
+                    const isActive = (opt.value === "semua") === viewAll;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => {
+                          const isViewAll = opt.value === "semua";
+                          setViewAll(isViewAll);
+                          if (isViewAll) {
+                            const total = (mode === "rekening"
+                              ? transactions.filter((t) => t.masukKeRekening)
+                              : transactions).length;
+                            setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+                          }
+                          setOpenViewDropdown(false);
+                        }}
+                        className={`w-full px-4 py-2.5 text-left text-sm transition hover:bg-slate-50 dark:hover:bg-slate-700 ${
+                          isActive
+                            ? "font-semibold text-slate-900 dark:text-white"
+                            : "text-slate-600 dark:text-slate-400"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Search — collapsed jadi icon, klik expand */}
@@ -1545,6 +1586,8 @@ export default function TransactionsPage({ bookId, mode = "semua" }: Props) {
           </div>
         </div>
       </Modal>
+
+
 
       <Modal
         open={open}

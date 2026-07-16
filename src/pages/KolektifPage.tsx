@@ -582,8 +582,10 @@ export default function KolektifPage() {
             type="button"
             onClick={() => {
               if (activeTab === "sub-buku") {
-                setRenameKolektifInput(kolektifTabLabel);
-                setOpenRenameKolektifModal(true);
+                if (userCanEdit) {
+                  setRenameKolektifInput(kolektifTabLabel);
+                  setOpenRenameKolektifModal(true);
+                }
               } else {
                 setActiveTab("sub-buku");
               }
