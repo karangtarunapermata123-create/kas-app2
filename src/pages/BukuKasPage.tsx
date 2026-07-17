@@ -999,8 +999,8 @@ export default function BukuKasPage() {
           </button>
         )}
 
-        {/* FAB tombol + untuk quick add transaksi — hanya di halaman utama (tidak di dalam buku) */}
-        {!bookId && (
+        {/* FAB tombol + untuk quick add transaksi — hanya di halaman utama (tidak di dalam buku), hanya super_admin dan admin */}
+        {!bookId && (profile?.role === "super_admin" || profile?.role === "admin") && (
           <button
             type="button"
             aria-label="Tambah transaksi"

@@ -213,7 +213,7 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
     const state = location.state as { selectedMonth?: string } | null;
     return !state?.selectedMonth; // false jika ada selectedMonth dari navigasi
   });
-  const [allPage, setAllPage] = useState(0);
+  const [allPage, setAllPage] = useState(-1); // -1 = selalu ke halaman terakhir
   const [dynamicPageSize, setDynamicPageSize] = useState(15);
   const ALL_PAGE_SIZE = viewAll ? dynamicPageSize : 15;
 
@@ -292,8 +292,7 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
   // Reset ke halaman terakhir saat page size dinamis berubah (mode Semua)
   useEffect(() => {
     if (!viewAll) return;
-    const total = filtered.length;
-    setAllPage(Math.max(0, Math.ceil(total / dynamicPageSize) - 1));
+    setAllPage(-1); // -1 = selalu resolve ke halaman terakhir
   }, [dynamicPageSize]);
 
   // Tutup dropdown saat klik di luar
@@ -352,9 +351,8 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
   useEffect(() => {
     getTransactions(bookId).then((txs) => {
       setTransactions(txs);
-      // Default ke halaman terakhir (terbaru di bawah) saat pertama load
-      const total = txs.length;
-      setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+      // Default ke halaman terakhir — gunakan sentinel -1
+      setAllPage(-1);
     });
 
     const onTransactionsChanged = (event: Event) => {
@@ -413,6 +411,14 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
     // Jika tidak, filter berdasarkan bulan yang dipilih
     return transactions.filter((t) => monthKey(t.date) === selectedMonth);
   }, [transactions, selectedMonth, isSearchMode, searchQuery, viewAll]);
+
+  // Saat mode Semua aktif dan data filtered berubah (transaksi baru/dihapus),
+  // pastikan halaman yang tampil adalah halaman TERAKHIR (terbaru)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!viewAll || isSearchMode) return;
+    setAllPage(-1); // selalu ke halaman terakhir
+  }, [filtered.length, viewAll]);
 
   const yearOptions = useMemo(() => {
     const years = new Set<string>();
@@ -498,7 +504,12 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
       setSortKey(key);
       setSortDir("asc");
     }
-    setAllPage(0);
+    // Saat mode Semua, tetap di halaman terakhir; saat mode bulan, reset ke halaman 0
+    if (viewAll) {
+      setAllPage(-1); // selalu ke halaman terakhir
+    } else {
+      setAllPage(0);
+    }
   }
 
   function sortIcon(key: SortKey) {
@@ -1027,7 +1038,10 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
     // Pagination saat viewAll — urutan ascending (terlama atas, terbaru bawah)
     if (viewAll && !isSearchMode) {
       const ascending = [...list].reverse();
-      return ascending.slice(allPage * ALL_PAGE_SIZE, (allPage + 1) * ALL_PAGE_SIZE);
+      const totalPages = Math.max(1, Math.ceil(ascending.length / ALL_PAGE_SIZE));
+      // -1 atau nilai melebihi batas → halaman terakhir
+      const page = allPage < 0 || allPage >= totalPages ? totalPages - 1 : allPage;
+      return ascending.slice(page * ALL_PAGE_SIZE, (page + 1) * ALL_PAGE_SIZE);
     }
     return list;
   }, [filtered, mode, sortKey, sortDir, categories, viewAll, allPage, isSearchMode]);
@@ -1124,10 +1138,7 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
                           const isViewAll = opt.value === "semua";
                           setViewAll(isViewAll);
                           if (isViewAll) {
-                            const total = (mode === "rekening"
-                              ? transactions.filter((t) => t.masukKeRekening)
-                              : transactions).length;
-                            setAllPage(Math.max(0, Math.ceil(total / ALL_PAGE_SIZE) - 1));
+                            setAllPage(-1); // selalu ke halaman terakhir
                           }
                           setOpenViewDropdown(false);
                         }}
@@ -1220,13 +1231,15 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
               : filtered
             ).length;
             const totalPages = Math.ceil(totalItems / ALL_PAGE_SIZE) || 1;
+            // Resolve halaman aktual: -1 atau melebihi batas → halaman terakhir
+            const currentPage = allPage < 0 || allPage >= totalPages ? totalPages - 1 : allPage;
             return (
               <div className="flex items-center justify-between gap-2">
-                <button type="button" disabled={allPage === 0} onClick={() => setAllPage((p) => p - 1)} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+                <button type="button" disabled={currentPage === 0} onClick={() => setAllPage((p) => { const cp = p < 0 || p >= totalPages ? totalPages - 1 : p; return Math.max(0, cp - 1); })} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
                   ← Sebelumnya
                 </button>
-                <span className="text-xs text-slate-500 dark:text-slate-400">{allPage + 1} / {totalPages}</span>
-                <button type="button" disabled={allPage >= totalPages - 1} onClick={() => setAllPage((p) => p + 1)} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
+                <span className="text-xs text-slate-500 dark:text-slate-400">{currentPage + 1} / {totalPages}</span>
+                <button type="button" disabled={currentPage >= totalPages - 1} onClick={() => setAllPage((p) => { const cp = p < 0 || p >= totalPages ? totalPages - 1 : p; return Math.min(totalPages - 1, cp + 1); })} className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition">
                   Selanjutnya →
                 </button>
               </div>
