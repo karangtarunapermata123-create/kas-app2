@@ -10,9 +10,13 @@ import {
   addKolektifRow,
   updateKolektifRow,
   deleteKolektifRow,
+  addKolektifExtraColumn,
+  updateKolektifExtraColumn,
+  deleteKolektifExtraColumn,
+  saveKolektifRowExtraValues,
 } from "../lib/store";
 import { formatIDR } from "../lib/money";
-import type { KolektifConfig, KolektifRow } from "../lib/types";
+import type { KolektifConfig, KolektifColumnType, KolektifExtraColumn, KolektifRow } from "../lib/types";
 
 export default function KolektifSessionPage() {
   const { bookId, sessionId } = useParams<{
@@ -39,6 +43,7 @@ export default function KolektifSessionPage() {
     nominalLabelType: "number",
     noteLabelType: "text",
     rows: [],
+    extraColumns: [],
   });
   const [loading, setLoading] = useState(true);
 
@@ -57,9 +62,18 @@ export default function KolektifSessionPage() {
   const [headerInput, setHeaderInput] = useState("");
   const [nominalInput, setNominalInput] = useState("");
   const [noteHeaderInput, setNoteHeaderInput] = useState("");
-  const [headerType, setHeaderType] = useState<"text" | "number">("text");
-  const [nominalType, setNominalType] = useState<"text" | "number">("number");
-  const [noteType, setNoteType] = useState<"text" | "number">("text");
+  const [headerType, setHeaderType] = useState<KolektifColumnType>("text");
+  const [nominalType, setNominalType] = useState<KolektifColumnType>("number");
+  const [noteType, setNoteType] = useState<KolektifColumnType>("text");
+
+  // Modal manage extra columns
+  const [openExtraColumnsModal, setOpenExtraColumnsModal] = useState(false);
+  const [editingExtraColumn, setEditingExtraColumn] = useState<KolektifExtraColumn | null>(null);
+  const [extraColInput, setExtraColInput] = useState("");
+  const [extraColType, setExtraColType] = useState<KolektifColumnType>("text");
+
+  // Extra column values for row modal
+  const [rowExtraValues, setRowExtraValues] = useState<Record<string, string>>({});
 
   // Modal hapus
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
@@ -86,6 +100,7 @@ export default function KolektifSessionPage() {
     setRowNoteValue("");
     setRowNote("");
     setRowTxType("masuk");
+    setRowExtraValues({});
     setOpenRowModal(true);
   }
 
@@ -101,7 +116,11 @@ export default function KolektifSessionPage() {
       setRowNoteValue("");
       setRowNote(row.note ?? "");
     }
+    if (config.headerLabelType === "date") {
+      setRowLabel(row.headerValue ? String(row.headerValue) : row.label);
+    }
     setRowTxType(row.txType ?? "masuk");
+    setRowExtraValues(row.extraValues ?? {});
     setOpenRowModal(true);
   }
 
@@ -114,12 +133,18 @@ export default function KolektifSessionPage() {
     try {
       let label: string;
       let noteText: string | undefined;
+      let headerVal: number | undefined;
       
       // Handle header column
       if (config.headerLabelType === "number") {
         label = String(headerValue);
+        headerVal = headerValue;
+      } else if (config.headerLabelType === "date") {
+        label = rowLabel.trim();
+        headerVal = 0;
       } else {
         label = rowLabel.trim();
+        headerVal = undefined;
         if (!label) {
           setSaving(false);
           return;
@@ -136,13 +161,17 @@ export default function KolektifSessionPage() {
       if (editingRow) {
         await updateKolektifRow(
           editingRow.id,
-          config.headerLabelType === "number" ? String(headerValue) : editingRow.label,
+          config.headerLabelType === "number" ? String(headerValue) : (config.headerLabelType === "date" ? rowLabel.trim() : editingRow.label),
           amount,
           noteText,
-          headerValue,
-          noteValue,
+          config.headerLabelType === "number" ? headerValue : (config.headerLabelType === "date" ? 0 : undefined),
+          config.noteLabelType === "number" ? noteValue : 0,
           config.nominalLabelType === "number" ? rowTxType : undefined,
         );
+        // Save extra values
+        if (config.extraColumns.length > 0) {
+          await saveKolektifRowExtraValues(editingRow.id, rowExtraValues);
+        }
       } else {
         await addKolektifRow(
           safeSessionId,
@@ -150,8 +179,8 @@ export default function KolektifSessionPage() {
           label,
           amount,
           noteText,
-          headerValue,
-          noteValue,
+          config.headerLabelType === "date" ? 0 : headerVal,
+          config.noteLabelType === "number" ? noteValue : 0,
           config.nominalLabelType === "number" ? rowTxType : undefined,
         );
       }
@@ -160,6 +189,49 @@ export default function KolektifSessionPage() {
     } catch (error) {
       console.error("Error saving row:", error);
       alert("Gagal menyimpan data. Pastikan database sudah di-migrate: jalankan migration_add_kolektif_numeric_columns.sql");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Extra columns modal ──
+  function openAddExtraColumn() {
+    setEditingExtraColumn(null);
+    setExtraColInput("");
+    setExtraColType("text");
+    setOpenExtraColumnsModal(true);
+  }
+
+  function openEditExtraColumn(col: KolektifExtraColumn) {
+    setEditingExtraColumn(col);
+    setExtraColInput(col.label);
+    setExtraColType(col.columnType);
+    setOpenExtraColumnsModal(true);
+  }
+
+  async function saveExtraColumn() {
+    const name = extraColInput.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      if (editingExtraColumn) {
+        await updateKolektifExtraColumn(editingExtraColumn.id, name, extraColType);
+      } else {
+        await addKolektifExtraColumn(safeSessionId, name, extraColType);
+      }
+      await refresh();
+      setOpenExtraColumnsModal(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeleteExtraColumn(col: KolektifExtraColumn) {
+    if (!confirm(`Hapus kolom "${col.label}"? Data di kolom ini akan ikut terhapus.`)) return;
+    setSaving(true);
+    try {
+      await deleteKolektifExtraColumn(col.id);
+      await refresh();
     } finally {
       setSaving(false);
     }
@@ -210,6 +282,12 @@ export default function KolektifSessionPage() {
     if (config.noteLabelType === "number") {
       sum += (r.noteValue ?? (Number(r.note) || 0));
     }
+    for (const col of config.extraColumns) {
+      if (col.columnType === "number") {
+        const val = Number(r.extraValues?.[col.id]);
+        sum += Number.isFinite(val) ? val : 0;
+      }
+    }
     return sum;
   }, 0);
 
@@ -243,155 +321,166 @@ export default function KolektifSessionPage() {
 
   return (
     <div className="grid gap-4">
-      {/* Header: total saldo */}
-      <div className="flex items-center gap-3">
+      {/* Toolbar: stats + aksi kolom */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Statistik */}
         {config.rows.length > 0 && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-5 py-3 flex items-center gap-4">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 flex items-center gap-3 text-sm">
             <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Total Saldo
-              </div>
-              <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                {formatIDR(totalAmount)}
-              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Total</div>
+              <div className="font-bold text-emerald-600 dark:text-emerald-400">{formatIDR(totalAmount)}</div>
             </div>
-            <div className="h-8 w-px bg-slate-200 dark:bg-slate-700" />
+            <div className="h-7 w-px bg-slate-200 dark:bg-slate-700" />
             <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Baris
-              </div>
-              <div className="text-lg font-bold text-slate-900 dark:text-white">
-                {config.rows.length}
-              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Baris</div>
+              <div className="font-bold text-slate-900 dark:text-white">{config.rows.length}</div>
             </div>
+          </div>
+        )}
+
+        {/* Tombol atur kolom — hanya tampil untuk editor */}
+        {userCanEdit && (
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={() => {
+                setHeaderInput(config.headerLabel);
+                setNominalInput(config.nominalLabel);
+                setNoteHeaderInput(config.noteLabel);
+                setHeaderType(config.headerLabelType);
+                setNominalType(config.nominalLabelType);
+                setNoteType(config.noteLabelType);
+                setOpenHeaderModal(true);
+              }}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+              </svg>
+              Atur Kolom
+            </button>
           </div>
         )}
       </div>
 
       {/* Tabel */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
-        <table
-          className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-sm"
-          style={{ tableLayout: "fixed", minWidth: "480px" }}
-        >
+      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+        <table className="border-separate border-spacing-0 text-sm" style={{ minWidth: `${Math.max(480, 160 + 140 + 140 + config.extraColumns.length * 140)}px`, width: "100%" }}>
           <colgroup>
-            <col style={{ width: userCanEdit ? "33%" : "40%" }} />
-            <col style={{ width: userCanEdit ? "30%" : "30%" }} />
-            <col style={{ width: "37%" }} />
+            {/* Kolom no + header: sticky, lebar cukup */}
+            <col style={{ minWidth: "160px", width: "22%" }} />
+            {/* Kolom nominal */}
+            <col style={{ minWidth: "140px", width: "18%" }} />
+            {/* Kolom note */}
+            <col style={{ minWidth: "140px", width: "20%" }} />
+            {/* Extra columns: fixed 140px each */}
+            {config.extraColumns.map((col) => (
+              <col key={col.id} style={{ minWidth: "140px", width: "140px" }} />
+            ))}
+
           </colgroup>
-          <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+          <thead className="bg-slate-50 dark:bg-slate-900 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
             <tr>
-              <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
-                <span>{config.headerLabel}</span>
+              <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
+                {config.headerLabel}
               </th>
-              <th className="border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
-                <span>{config.nominalLabel}</span>
+              <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap">
+                {config.nominalLabel}
               </th>
-              <th className="border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left">
-                <div className="flex items-center justify-between">
-                  <span>{config.noteLabel}</span>
-                  {userCanEdit && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setHeaderInput(config.headerLabel);
-                        setNominalInput(config.nominalLabel);
-                        setNoteHeaderInput(config.noteLabel);
-                        setHeaderType(config.headerLabelType);
-                        setNominalType(config.nominalLabelType);
-                        setNoteType(config.noteLabelType);
-                        setOpenHeaderModal(true);
-                      }}
-                      className="rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                      title="Ubah nama kolom"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
-                      </svg>
-                    </button>
-                  )}
-                </div>
+              <th className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
+                {config.noteLabel}
               </th>
+              {config.extraColumns.map((col, i) => (
+                <th
+                  key={col.id}
+                  className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap ${i < config.extraColumns.length - 1 || userCanEdit ? "border-r" : ""}`}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate max-w-[100px]">{col.label}</span>
+                    {userCanEdit && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingExtraColumn(col);
+                          setExtraColInput(col.label);
+                          setExtraColType(col.columnType);
+                          setOpenExtraColumnsModal(true);
+                        }}
+                        className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition"
+                        title={`Edit kolom "${col.label}"`}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {config.rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={userCanEdit ? 4 : 3}
-                  className="px-4 py-10 text-center text-slate-400 dark:text-slate-500 text-sm"
+                  colSpan={3 + config.extraColumns.length}
+                  className="px-4 py-12 text-center text-slate-400 dark:text-slate-500"
                 >
                   Belum ada data.
-                  {userCanEdit
-                    ? ' Klik "+ Tambah" untuk menambahkan baris.'
-                    : ""}
+                  {userCanEdit ? ' Klik "+" untuk menambahkan baris.' : ""}
                 </td>
               </tr>
             ) : (
               config.rows.map((row, idx) => (
                 <tr
                   key={row.id}
-                  className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 ${userCanEdit ? "cursor-pointer" : ""}`}
+                  className={`group hover:bg-slate-50 dark:hover:bg-slate-700/40 ${userCanEdit ? "cursor-pointer" : ""}`}
                   onClick={userCanEdit ? () => openEditRow(row) : undefined}
                 >
-                  <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 font-medium text-slate-900 dark:text-white">
+                  {/* Kolom header — sticky */}
+                  <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/40 px-4 py-3 font-medium text-slate-900 dark:text-white transition-colors">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0">
-                        {idx + 1}.
-                      </span>
-                      <span className="truncate">
-                        {config.headerLabelType === "number" 
+                      <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0 tabular-nums">{idx + 1}.</span>
+                      <span className="truncate max-w-[110px]">
+                        {config.headerLabelType === "number"
                           ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
                           : row.label}
                       </span>
                     </div>
                   </td>
-                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium">
+                  {/* Nominal */}
+                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium tabular-nums">
                     {config.nominalLabelType === "number" ? (
                       <span className={row.txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}>
-                        {row.txType === "keluar" ? "- " : ""}{formatIDR(row.amount)}
+                        {row.txType === "keluar" ? "−\u202f" : ""}{formatIDR(row.amount)}
                       </span>
                     ) : (
-                      String(row.amount)
+                      <span className="text-slate-700 dark:text-slate-300">{String(row.amount)}</span>
                     )}
                   </td>
-                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 truncate text-xs">
-                    {config.noteLabelType === "number"
-                      ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
-                      : (row.note || "-")}
+                  {/* Note */}
+                  <td className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
+                    <span className="line-clamp-2">
+                      {config.noteLabelType === "number"
+                        ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
+                        : (row.note || "-")}
+                    </span>
                   </td>
-                  {userCanEdit && (
+                  {/* Extra columns */}
+                  {config.extraColumns.map((col, i) => (
                     <td
-                      className="border-b border-slate-200 dark:border-slate-700 px-2 py-3 text-center"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeletingRow(row);
-                        setOpenDeleteModal(true);
-                      }}
+                      key={col.id}
+                      className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${i < config.extraColumns.length - 1 ? "border-r" : ""}`}
                     >
-                      <button
-                        type="button"
-                        className="rounded p-1 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                        title="Hapus"
-                      >
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="h-4 w-4"
-                        >
-                          <path d="M3 6h18" />
-                          <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
-                          <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                        </svg>
-                      </button>
+                      <span className="line-clamp-2">
+                        {col.columnType === "number"
+                          ? (row.extraValues?.[col.id] ? formatIDR(Number(row.extraValues[col.id])) : "-")
+                          : (row.extraValues?.[col.id] || "-")}
+                      </span>
                     </td>
-                  )}
+                  ))}
                 </tr>
               ))
             )}
@@ -432,6 +521,14 @@ export default function KolektifSessionPage() {
                 onChange={(e) => setRowHeaderValue(e.target.value.replace(/\D/g, ""))}
                 onKeyDown={(e) => e.key === "Enter" && saveRow()}
                 inputMode="numeric"
+              />
+            ) : config.headerLabelType === "date" ? (
+              <input
+                type="date"
+                className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+                value={rowLabel}
+                onChange={(e) => setRowLabel(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
               />
             ) : (
               <Input
@@ -503,6 +600,14 @@ export default function KolektifSessionPage() {
                 onKeyDown={(e) => e.key === "Enter" && saveRow()}
                 inputMode="numeric"
               />
+            ) : config.noteLabelType === "date" ? (
+              <input
+                type="date"
+                className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+                value={rowNote}
+                onChange={(e) => setRowNote(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && saveRow()}
+              />
             ) : (
               <input
                 className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
@@ -518,6 +623,43 @@ export default function KolektifSessionPage() {
               </div>
             )}
           </div>
+          {/* Extra column inputs */}
+          {config.extraColumns.map((col) => (
+            <div key={col.id}>
+              <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+                {col.label}
+              </div>
+              {col.columnType === "date" ? (
+                <input
+                  type="date"
+                  className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+                  value={rowExtraValues[col.id] || ""}
+                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                />
+              ) : col.columnType === "number" ? (
+                <Input
+                  placeholder="Contoh: 50000"
+                  value={rowExtraValues[col.id] || ""}
+                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value.replace(/\D/g, "") }))}
+                  onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                  inputMode="numeric"
+                />
+              ) : (
+                <input
+                  className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+                  placeholder={col.label}
+                  value={rowExtraValues[col.id] || ""}
+                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                  onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                />
+              )}
+              {col.columnType === "number" && rowExtraValues[col.id] && Number(rowExtraValues[col.id]) > 0 && (
+                <div className="mt-1 text-xs text-slate-500">
+                  {formatIDR(Number(rowExtraValues[col.id]))}
+                </div>
+              )}
+            </div>
+          ))}
           <div className="flex justify-between items-center gap-2">
             {editingRow && userCanEdit && (
               <button
@@ -547,7 +689,7 @@ export default function KolektifSessionPage() {
         </div>
       </Modal>
 
-      {/* Modal edit header */}
+      {/* Modal edit header + extra columns */}
       <Modal
         open={openHeaderModal}
         title="Ubah Nama & Tipe Kolom"
@@ -571,11 +713,12 @@ export default function KolektifSessionPage() {
               </label>
               <select
                 value={headerType}
-                onChange={(e) => setHeaderType(e.target.value as "text" | "number")}
+                onChange={(e) => setHeaderType(e.target.value as KolektifColumnType)}
                 className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
               >
                 <option value="text">Text</option>
                 <option value="number">Angka/Uang</option>
+                <option value="date">Tanggal</option>
               </select>
             </div>
           </div>
@@ -619,15 +762,83 @@ export default function KolektifSessionPage() {
               </label>
               <select
                 value={noteType}
-                onChange={(e) => setNoteType(e.target.value as "text" | "number")}
+                onChange={(e) => setNoteType(e.target.value as KolektifColumnType)}
                 className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
               >
                 <option value="text">Text</option>
                 <option value="number">Angka/Uang</option>
+                <option value="date">Tanggal</option>
               </select>
             </div>
           </div>
-          <div className="flex justify-end gap-2">
+
+          {/* Extra columns section */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom Tambahan</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingExtraColumn(null);
+                  setExtraColInput("");
+                  setExtraColType("text");
+                  setOpenExtraColumnsModal(true);
+                }}
+                className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                  <path d="M5 12h14"/><path d="M12 5v14"/>
+                </svg>
+                Tambah
+              </button>
+            </div>
+            {config.extraColumns.length === 0 ? (
+              <div className="text-xs text-slate-400 italic">Belum ada kolom tambahan</div>
+            ) : (
+              <div className="grid gap-2">
+                {config.extraColumns.map((col) => (
+                  <div key={col.id} className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{col.label}</span>
+                      <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 shrink-0">
+                        {col.columnType === "number" ? "Angka" : col.columnType === "date" ? "Tanggal" : "Text"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingExtraColumn(col);
+                          setExtraColInput(col.label);
+                          setExtraColType(col.columnType);
+                          setOpenExtraColumnsModal(true);
+                        }}
+                        className="rounded p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        title="Edit"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteExtraColumn(col)}
+                        className="rounded p-1 text-rose-400 hover:text-rose-600"
+                        title="Hapus"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
             <Button
               variant="secondary"
               onClick={() => setOpenHeaderModal(false)}
@@ -635,6 +846,50 @@ export default function KolektifSessionPage() {
               Batal
             </Button>
             <Button onClick={saveHeader} disabled={saving}>
+              {saving ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal tambah/edit extra column (dipanggil dari dalam modal header) */}
+      <Modal
+        open={openExtraColumnsModal}
+        title={editingExtraColumn ? "Edit Kolom" : "Tambah Kolom"}
+        onClose={() => setOpenExtraColumnsModal(false)}
+      >
+        <div className="grid gap-4">
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Nama Kolom
+            </div>
+            <Input
+              placeholder="Contoh: Alamat"
+              value={extraColInput}
+              onChange={(e) => setExtraColInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && saveExtraColumn()}
+              autoFocus
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">
+              Tipe
+            </div>
+            <select
+              value={extraColType}
+              onChange={(e) => setExtraColType(e.target.value as KolektifColumnType)}
+              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+            >
+              <option value="text">Text</option>
+              <option value="number">Angka/Uang</option>
+              <option value="date">Tanggal</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenExtraColumnsModal(false)}>
+              Batal
+            </Button>
+            <Button onClick={saveExtraColumn} disabled={!extraColInput.trim() || saving}>
               {saving ? "Menyimpan..." : "Simpan"}
             </Button>
           </div>

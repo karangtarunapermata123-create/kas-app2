@@ -25,9 +25,18 @@ export type KolektifRow = {
   noteValue?: number;
   note?: string;
   txType?: "masuk" | "keluar"; // hanya relevan saat nominalLabelType === "number"
+  extraValues?: Record<string, string>; // columnId → value (untuk extra columns)
 };
 
-export type KolektifColumnType = "text" | "number";
+export type KolektifColumnType = "text" | "number" | "date";
+
+export type KolektifExtraColumn = {
+  id: string;
+  sessionId: string;
+  label: string;
+  columnType: KolektifColumnType;
+  sortOrder: number;
+};
 
 export type KolektifConfig = {
   sessionId: string;
@@ -38,6 +47,7 @@ export type KolektifConfig = {
   nominalLabelType: KolektifColumnType;
   noteLabelType: KolektifColumnType;
   rows: KolektifRow[];
+  extraColumns: KolektifExtraColumn[];
 };
 
 export type Category = {

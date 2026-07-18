@@ -711,7 +711,7 @@ export default function KolektifPage() {
             }`}
           >
             <span className="truncate max-w-[100px]">{kolektifTabLabel || "Sub-buku"}</span>
-            {userCanEdit && (
+            {userCanEdit && activeTab === "sub-buku" && (
               <span
                 role="button"
                 tabIndex={0}
@@ -738,14 +738,16 @@ export default function KolektifPage() {
                 }`}
               >
                 <span className="truncate max-w-[100px]">{linkedKolektifTabLabels[b.id] ?? b.name}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); setOpenLinkedKolektifModal(true); }}
-                  onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setOpenLinkedKolektifModal(true))}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
-                  title="Info"
-                ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
+                {userCanEdit && isActive && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setOpenLinkedKolektifModal(true); }}
+                    onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setOpenLinkedKolektifModal(true))}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
+                    title="Info"
+                  ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
+                )}
               </button>
             );
           })}
@@ -765,7 +767,7 @@ export default function KolektifPage() {
                 }`}
               >
                 <span className="truncate max-w-[100px]">{linkedRoutineTabLabels[b.id] ?? b.name}</span>
-                {userCanEdit && (
+                {userCanEdit && isActive && (
                   <span
                     role="button"
                     tabIndex={0}
@@ -794,14 +796,16 @@ export default function KolektifPage() {
                 }`}
               >
                 <span className="truncate max-w-[100px]">{linkedBookTabLabels[b.id] ?? b.name}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  onClick={(e) => { e.stopPropagation(); setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name); setOpenLinkedBookModal(true); }}
-                  onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name), setOpenLinkedBookModal(true))}
-                  className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
-                  title="Info"
-                ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
+                {isActive && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name); setOpenLinkedBookModal(true); }}
+                    onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setRenameLinkedTabInput(linkedBookTabLabels[b.id] ?? b.name), setOpenLinkedBookModal(true))}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
+                    title="Info"
+                  ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
+                )}
               </button>
             );
           })}

@@ -15,6 +15,7 @@ import type {
   RoutineSession,
   KolektifConfig,
   KolektifColumnType,
+  KolektifExtraColumn,
   KolektifRow,
   KolektifSession,
   Activity,
@@ -114,7 +115,7 @@ export async function deleteKolektifSession(sessionId: string): Promise<void> {
 export async function getKolektifConfig(
   sessionId: string,
 ): Promise<KolektifConfig> {
-  const [configRes, rowsRes] = await Promise.all([
+  const [configRes, rowsRes, extraColumnsRes] = await Promise.all([
     supabase
       .from("kolektif_config")
       .select("*")
@@ -126,6 +127,11 @@ export async function getKolektifConfig(
       .eq("session_id", sessionId)
       .order("sort_order", { ascending: true })
       .order("created_at", { ascending: true }),
+    supabase
+      .from("kolektif_extra_columns")
+      .select("*")
+      .eq("session_id", sessionId)
+      .order("sort_order", { ascending: true }),
   ]);
   const headerLabel = configRes.data?.header_label ?? "Nama";
   const nominalLabel = configRes.data?.nominal_label ?? "Nominal";
@@ -143,6 +149,17 @@ export async function getKolektifConfig(
     if (data.note_column_type !== undefined) noteLabelType = data.note_column_type;
   }
   
+  const extraColumns: KolektifExtraColumn[] = (extraColumnsRes.data ?? []).map((c) => {
+    const col = c as any;
+    return {
+      id: col.id,
+      sessionId: col.session_id,
+      label: col.label,
+      columnType: (col.column_type as KolektifColumnType) || "text",
+      sortOrder: col.sort_order,
+    };
+  });
+  
   const rows: KolektifRow[] = (rowsRes.data ?? []).map((r) => {
     const rowData = r as any;
     return {
@@ -153,6 +170,7 @@ export async function getKolektifConfig(
       noteValue: rowData.note_value ?? undefined,
       note: r.note ?? undefined,
       txType: (rowData.tx_type === "keluar" ? "keluar" : "masuk") as "masuk" | "keluar",
+      extraValues: rowData.extra_values ?? undefined,
     };
   });
   
@@ -164,8 +182,64 @@ export async function getKolektifConfig(
     headerLabelType,
     nominalLabelType,
     noteLabelType,
-    rows 
+    rows,
+    extraColumns,
   };
+}
+
+export async function addKolektifExtraColumn(
+  sessionId: string,
+  label: string,
+  columnType: KolektifColumnType,
+): Promise<void> {
+  // Get next sort order
+  const { data: existing } = await supabase
+    .from("kolektif_extra_columns")
+    .select("sort_order")
+    .eq("session_id", sessionId)
+    .order("sort_order", { ascending: false })
+    .limit(1);
+  const nextOrder = (existing?.[0]?.sort_order ?? 0) + 1;
+  
+  const { error } = await supabase.from("kolektif_extra_columns").insert({
+    id: uid("kec"),
+    session_id: sessionId,
+    label: label.trim(),
+    column_type: columnType,
+    sort_order: nextOrder,
+  });
+  if (error) throw error;
+}
+
+export async function updateKolektifExtraColumn(
+  columnId: string,
+  label: string,
+  columnType: KolektifColumnType,
+): Promise<void> {
+  const { error } = await supabase
+    .from("kolektif_extra_columns")
+    .update({ label: label.trim(), column_type: columnType })
+    .eq("id", columnId);
+  if (error) throw error;
+}
+
+export async function deleteKolektifExtraColumn(columnId: string): Promise<void> {
+  const { error } = await supabase
+    .from("kolektif_extra_columns")
+    .delete()
+    .eq("id", columnId);
+  if (error) throw error;
+}
+
+export async function saveKolektifRowExtraValues(
+  rowId: string,
+  extraValues: Record<string, string>,
+): Promise<void> {
+  const { error } = await supabase
+    .from("kolektif_rows")
+    .update({ extra_values: extraValues })
+    .eq("id", rowId);
+  if (error) throw error;
 }
 
 export async function updateKolektifLabels(
