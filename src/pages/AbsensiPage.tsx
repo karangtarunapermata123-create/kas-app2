@@ -2029,7 +2029,6 @@ export default function AbsensiPage() {
                 value={renameActivityValue}
                 onChange={(e) => setRenameActivityValue(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleConfirmRenameActivity()}
-                autoFocus
               />
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">

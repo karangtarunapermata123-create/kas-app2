@@ -73,11 +73,14 @@ export default function KolektifSessionPage() {
   const [extraColType, setExtraColType] = useState<KolektifColumnType>("text");
 
   // Extra column values for row modal
-  const [rowExtraValues, setRowExtraValues] = useState<Record<string, string>>({});
+  const [rowExtraValues, setRowExtraValues] = useState<Record<string, { value: string; txType: "masuk" | "keluar" }>>({});
 
   // Modal hapus
   const [openDeleteModal, setOpenDeleteModal] = useState(false);
   const [deletingRow, setDeletingRow] = useState<KolektifRow | null>(null);
+  // Modal hapus kolom tambahan
+  const [openDeleteExtraColumnModal, setOpenDeleteExtraColumnModal] = useState(false);
+  const [deletingExtraColumn, setDeletingExtraColumn] = useState<KolektifExtraColumn | null>(null);
 
   const [saving, setSaving] = useState(false);
 
@@ -120,7 +123,20 @@ export default function KolektifSessionPage() {
       setRowLabel(row.headerValue ? String(row.headerValue) : row.label);
     }
     setRowTxType(row.txType ?? "masuk");
-    setRowExtraValues(row.extraValues ?? {});
+
+    // Konversi extraValues untuk backward compatibility
+    const convertedExtraValues: Record<string, { value: string; txType: "masuk" | "keluar" }> = {};
+    if (row.extraValues) {
+      for (const colId of Object.keys(row.extraValues)) {
+        const val = row.extraValues[colId];
+        if (typeof val === "string") {
+          convertedExtraValues[colId] = { value: val, txType: "masuk" };
+        } else {
+          convertedExtraValues[colId] = { ...val, txType: val.txType ?? "masuk" };
+        }
+      }
+    }
+    setRowExtraValues(convertedExtraValues);
     setOpenRowModal(true);
   }
 
@@ -145,10 +161,6 @@ export default function KolektifSessionPage() {
       } else {
         label = rowLabel.trim();
         headerVal = undefined;
-        if (!label) {
-          setSaving(false);
-          return;
-        }
       }
       
       // Handle note column
@@ -173,7 +185,7 @@ export default function KolektifSessionPage() {
           await saveKolektifRowExtraValues(editingRow.id, rowExtraValues);
         }
       } else {
-        await addKolektifRow(
+        const newRowId = await addKolektifRow(
           safeSessionId,
           safeBookId,
           label,
@@ -183,6 +195,10 @@ export default function KolektifSessionPage() {
           config.noteLabelType === "number" ? noteValue : 0,
           config.nominalLabelType === "number" ? rowTxType : undefined,
         );
+        // Save extra values for new row
+        if (config.extraColumns.length > 0) {
+          await saveKolektifRowExtraValues(newRowId, rowExtraValues);
+        }
       }
       await refresh();
       setOpenRowModal(false);
@@ -227,11 +243,18 @@ export default function KolektifSessionPage() {
   }
 
   async function handleDeleteExtraColumn(col: KolektifExtraColumn) {
-    if (!confirm(`Hapus kolom "${col.label}"? Data di kolom ini akan ikut terhapus.`)) return;
+    setDeletingExtraColumn(col);
+    setOpenDeleteExtraColumnModal(true);
+  }
+
+  async function doDeleteExtraColumn() {
+    if (!deletingExtraColumn) return;
     setSaving(true);
     try {
-      await deleteKolektifExtraColumn(col.id);
+      await deleteKolektifExtraColumn(deletingExtraColumn.id);
       await refresh();
+      setOpenDeleteExtraColumnModal(false);
+      setDeletingExtraColumn(null);
     } finally {
       setSaving(false);
     }
@@ -284,8 +307,19 @@ export default function KolektifSessionPage() {
     }
     for (const col of config.extraColumns) {
       if (col.columnType === "number") {
-        const val = Number(r.extraValues?.[col.id]);
-        sum += Number.isFinite(val) ? val : 0;
+        const extraVal = r.extraValues?.[col.id];
+        let val: number;
+        let txType: "masuk" | "keluar" = "masuk";
+        if (typeof extraVal === "string") {
+          val = Number(extraVal);
+        } else if (extraVal && typeof extraVal === "object") {
+          val = Number(extraVal.value);
+          txType = extraVal.txType || "masuk";
+        } else {
+          val = 0;
+        }
+        const sign = txType === "keluar" ? -1 : 1;
+        sum += Number.isFinite(val) ? sign * val : 0;
       }
     }
     return sum;
@@ -469,18 +503,45 @@ export default function KolektifSessionPage() {
                     </span>
                   </td>
                   {/* Extra columns */}
-                  {config.extraColumns.map((col, i) => (
-                    <td
-                      key={col.id}
-                      className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${i < config.extraColumns.length - 1 ? "border-r" : ""}`}
-                    >
-                      <span className="line-clamp-2">
-                        {col.columnType === "number"
-                          ? (row.extraValues?.[col.id] ? formatIDR(Number(row.extraValues[col.id])) : "-")
-                          : (row.extraValues?.[col.id] || "-")}
-                      </span>
-                    </td>
-                  ))}
+                  {config.extraColumns.map((col, i) => {
+                    const extraVal = row.extraValues?.[col.id];
+                    let displayVal: string = "-";
+                    let colorClass: string = "text-slate-500 dark:text-slate-400";
+                    let sign: string = "";
+
+                    if (col.columnType === "number") {
+                      let val: number = 0;
+                      let txType: "masuk" | "keluar" = "masuk";
+                      if (typeof extraVal === "string") {
+                        val = Number(extraVal);
+                      } else if (extraVal && typeof extraVal === "object") {
+                        val = Number(extraVal.value);
+                        txType = extraVal.txType || "masuk";
+                      }
+                      if (val > 0) {
+                        displayVal = formatIDR(val);
+                        colorClass = txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400";
+                        sign = txType === "keluar" ? "−\u202f" : "";
+                      }
+                    } else {
+                      if (typeof extraVal === "string") {
+                        displayVal = extraVal || "-";
+                      } else if (extraVal && typeof extraVal === "object") {
+                        displayVal = extraVal.value || "-";
+                      }
+                    }
+
+                    return (
+                      <td
+                        key={col.id}
+                        className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-xs font-medium tabular-nums ${i < config.extraColumns.length - 1 ? "border-r" : ""} ${colorClass}`}
+                      >
+                        <span className="line-clamp-2">
+                          {sign}{displayVal}
+                        </span>
+                      </td>
+                    );
+                  })}
                 </tr>
               ))
             )}
@@ -536,7 +597,6 @@ export default function KolektifSessionPage() {
                 value={rowLabel}
                 onChange={(e) => setRowLabel(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && saveRow()}
-                autoFocus
               />
             )}
             {config.headerLabelType === "number" && rowHeaderValue && Number(rowHeaderValue) > 0 && (
@@ -633,29 +693,88 @@ export default function KolektifSessionPage() {
                 <input
                   type="date"
                   className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
-                  value={rowExtraValues[col.id] || ""}
-                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                  value={rowExtraValues[col.id]?.value || ""}
+                  onChange={(e) => setRowExtraValues((prev) => ({ 
+                    ...prev, 
+                    [col.id]: { 
+                      value: e.target.value, 
+                      txType: prev[col.id]?.txType || "masuk" 
+                    } 
+                  }))}
                 />
               ) : col.columnType === "number" ? (
-                <Input
-                  placeholder="Contoh: 50000"
-                  value={rowExtraValues[col.id] || ""}
-                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value.replace(/\D/g, "") }))}
-                  onKeyDown={(e) => e.key === "Enter" && saveRow()}
-                  inputMode="numeric"
-                />
+                <>
+                  <div className="mb-2 flex rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setRowExtraValues((prev) => ({ 
+                        ...prev, 
+                        [col.id]: { 
+                          value: prev[col.id]?.value || "", 
+                          txType: "masuk" 
+                        } 
+                      }))}
+                      className={`flex-1 py-1.5 text-sm font-medium transition ${
+                        (rowExtraValues[col.id]?.txType || "masuk") === "masuk"
+                          ? "bg-emerald-600 text-white"
+                          : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      Masuk
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRowExtraValues((prev) => ({ 
+                        ...prev, 
+                        [col.id]: { 
+                          value: prev[col.id]?.value || "", 
+                          txType: "keluar" 
+                        } 
+                      }))}
+                      className={`flex-1 py-1.5 text-sm font-medium transition border-l border-slate-200 dark:border-slate-700 ${
+                        (rowExtraValues[col.id]?.txType || "masuk") === "keluar"
+                          ? "bg-rose-600 text-white"
+                          : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      Keluar
+                    </button>
+                  </div>
+                  <Input
+                    placeholder="Contoh: 50000"
+                    value={rowExtraValues[col.id]?.value || ""}
+                    onChange={(e) => setRowExtraValues((prev) => ({ 
+                      ...prev, 
+                      [col.id]: { 
+                        value: e.target.value.replace(/\D/g, ""), 
+                        txType: prev[col.id]?.txType || "masuk" 
+                      } 
+                    }))}
+                    onKeyDown={(e) => e.key === "Enter" && saveRow()}
+                    inputMode="numeric"
+                  />
+                </>
               ) : (
                 <input
                   className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
                   placeholder={col.label}
-                  value={rowExtraValues[col.id] || ""}
-                  onChange={(e) => setRowExtraValues((prev) => ({ ...prev, [col.id]: e.target.value }))}
+                  value={rowExtraValues[col.id]?.value || ""}
+                  onChange={(e) => setRowExtraValues((prev) => ({ 
+                    ...prev, 
+                    [col.id]: { 
+                      value: e.target.value, 
+                      txType: prev[col.id]?.txType || "masuk" 
+                    } 
+                  }))}
                   onKeyDown={(e) => e.key === "Enter" && saveRow()}
                 />
               )}
-              {col.columnType === "number" && rowExtraValues[col.id] && Number(rowExtraValues[col.id]) > 0 && (
-                <div className="mt-1 text-xs text-slate-500">
-                  {formatIDR(Number(rowExtraValues[col.id]))}
+              {col.columnType === "number" && rowExtraValues[col.id]?.value && Number(rowExtraValues[col.id].value) > 0 && (
+                <div className={`mt-1 text-xs font-medium ${
+                  (rowExtraValues[col.id]?.txType || "masuk") === "keluar" ? "text-rose-600" : "text-emerald-600"
+                }`}>
+                  {(rowExtraValues[col.id]?.txType || "masuk") === "keluar" ? "- " : ""}
+                  {formatIDR(Number(rowExtraValues[col.id].value))}
                 </div>
               )}
             </div>
@@ -705,7 +824,6 @@ export default function KolektifSessionPage() {
               value={headerInput}
               onChange={(e) => setHeaderInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveHeader()}
-              autoFocus
             />
             <div className="mt-2">
               <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">
@@ -868,7 +986,6 @@ export default function KolektifSessionPage() {
               value={extraColInput}
               onChange={(e) => setExtraColInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && saveExtraColumn()}
-              autoFocus
             />
           </div>
           <div>
@@ -920,6 +1037,39 @@ export default function KolektifSessionPage() {
             <button
               type="button"
               onClick={doDelete}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {saving ? "Menghapus..." : "Hapus"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal hapus kolom tambahan */}
+      <Modal
+        open={openDeleteExtraColumnModal}
+        title="Hapus Kolom"
+        onClose={() => setOpenDeleteExtraColumnModal(false)}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Yakin hapus kolom{" "}
+            <span className="font-semibold text-slate-900 dark:text-white">
+              "{deletingExtraColumn?.label}"
+            </span>
+            ? Data di kolom ini akan ikut terhapus.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenDeleteExtraColumnModal(false)}
+            >
+              Batal
+            </Button>
+            <button
+              type="button"
+              onClick={doDeleteExtraColumn}
               disabled={saving}
               className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
             >

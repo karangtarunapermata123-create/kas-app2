@@ -1,14 +1,50 @@
 import { NavLink, useParams } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { formatIDR } from "../lib/money";
-import { getBooks, getBookStatsMap } from "../lib/store";
+import { getBooks, getBookStatsMap, getAllRestrictedBookIds, getUserBookViewPermissions } from "../lib/store";
+import { useAuth } from "../lib/auth";
 import type { Book } from "../lib/types";
 
 export default function BookGroupPage() {
   const { groupId } = useParams();
+  const { profile } = useAuth();
   const [books, setBooks] = useState<Book[]>([]);
   const [bookStats, setBookStats] = useState<Record<string, number>>({});
   const [isLoaded, setIsLoaded] = useState(false);
+  const [viewRestrictedBookIds, setViewRestrictedBookIds] = useState<Set<string>>(new Set());
+  const [userViewAllowedBookIds, setUserViewAllowedBookIds] = useState<Set<string>>(new Set());
+  const [viewPermissionsLoaded, setViewPermissionsLoaded] = useState(false);
+
+  useEffect(() => {
+    getBooks()
+      .then(setBooks)
+      .catch(console.error)
+      .finally(() => setIsLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    if (!profile || profile.role === "super_admin") {
+      setViewPermissionsLoaded(true);
+      return;
+    }
+    Promise.all([
+      getAllRestrictedBookIds(),
+      getUserBookViewPermissions(profile.id),
+    ]).then(([restrictedIds, allowedIds]) => {
+      setViewRestrictedBookIds(new Set(restrictedIds));
+      setUserViewAllowedBookIds(new Set(allowedIds));
+    }).catch(console.error).finally(() => {
+      setViewPermissionsLoaded(true);
+    });
+  }, [profile]);
+
+  function canViewBook(bookId: string): boolean {
+    if (!profile) return false;
+    if (profile.role === "super_admin") return true;
+    if (!viewPermissionsLoaded) return false;
+    if (!viewRestrictedBookIds.has(bookId)) return true;
+    return userViewAllowedBookIds.has(bookId);
+  }
 
   useEffect(() => {
     getBooks()
@@ -71,13 +107,25 @@ export default function BookGroupPage() {
         </div>
       </div>
 
-      {memberBooks.length === 0 ? (
+      {!viewPermissionsLoaded ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+          {Array.from({ length: Math.max(2, memberBooks.length) }).map((_, i) => (
+            <div key={i} className="flex flex-col gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 animate-pulse">
+              <div className="h-4 rounded bg-slate-200 dark:bg-slate-700 w-3/4" />
+              <div className="mt-auto space-y-1.5">
+                <div className="h-2.5 rounded bg-slate-200 dark:bg-slate-700 w-1/3" />
+                <div className="h-4 rounded bg-slate-200 dark:bg-slate-700 w-1/2" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : memberBooks.filter((book) => canViewBook(book.id)).length === 0 ? (
         <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
           Belum ada kas buku kas di dalam group ini.
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {memberBooks.map((book) => {
+          {memberBooks.filter((book) => canViewBook(book.id)).map((book) => {
             const href =
               book.type === "rutin"
                 ? `/buku-kas-rutin/${book.id}`

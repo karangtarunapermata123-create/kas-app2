@@ -30,6 +30,13 @@ import {
   setBookGroupMembers,
   setBookPermissions,
   getUserBookPermissions,
+  getBookViewPermissions,
+  setBookViewPermissions,
+  setBookViewPermissionsAdminOnly,
+  isAdminOnlyBook,
+  getUserBookViewPermissions,
+  getAllRestrictedBookIds,
+  SUPER_ADMIN_ONLY_SENTINEL,
 } from "../lib/store";
 import { formatIDR } from "../lib/money";
 import type {
@@ -116,6 +123,17 @@ export default function BukuKasPage() {
   );
   const [allAdminProfiles, setAllAdminProfiles] = useState<Profile[]>([]);
 
+  // State untuk modal izin lihat buku
+  const [openViewPermissionModal, setOpenViewPermissionModal] = useState(false);
+  const [viewPermissionBookId, setViewPermissionBookId] = useState<string | null>(null);
+  const [viewPermissionUserIds, setViewPermissionUserIds] = useState<Set<string>>(new Set());
+  const [viewPermissionAdminOnly, setViewPermissionAdminOnly] = useState(false);
+  const [allNonAdminProfiles, setAllNonAdminProfiles] = useState<Profile[]>([]);
+  // null = semua buku (super_admin), Set = book_id yg punya restriksi lihat untuk user ini
+  const [viewRestrictedBookIds, setViewRestrictedBookIds] = useState<Set<string> | null>(null);
+  const [userViewAllowedBookIds, setUserViewAllowedBookIds] = useState<Set<string>>(new Set());
+  const [viewPermissionsLoaded, setViewPermissionsLoaded] = useState(false);
+
   // State untuk modal alert
   const [openAlertModal, setOpenAlertModal] = useState(false);
   const [alertMessage, setAlertMessage] = useState("");
@@ -134,6 +152,25 @@ export default function BukuKasPage() {
   useEffect(() => {
     getBooks().then(setBooks).catch(console.error);
   }, []);
+
+  // Load view restrictions untuk non-super_admin
+  useEffect(() => {
+    if (!profile) return;
+    if (profile.role === "super_admin") {
+      setViewRestrictedBookIds(null); // super admin lihat semua
+      setViewPermissionsLoaded(true);
+      return;
+    }
+    Promise.all([
+      getAllRestrictedBookIds(),
+      getUserBookViewPermissions(profile.id),
+    ]).then(([restrictedIds, allowedIds]) => {
+      setViewRestrictedBookIds(new Set(restrictedIds));
+      setUserViewAllowedBookIds(new Set(allowedIds));
+    }).catch(console.error).finally(() => {
+      setViewPermissionsLoaded(true);
+    });
+  }, [profile]);
 
   // Load currentBook when bookId changes
   useEffect(() => {
@@ -876,14 +913,48 @@ export default function BukuKasPage() {
     return baseLabel;
   }
 
+  /**
+   * Cek apakah buku ini boleh dilihat user saat ini.
+   * - super_admin: selalu boleh
+   * - Buku yang tidak ada di viewRestrictedBookIds: semua boleh lihat
+   * - Buku yang ada di viewRestrictedBookIds: hanya user yang ada di userViewAllowedBookIds
+   */
+  function canViewBook(bookId: string): boolean {
+    if (!profile) return false;
+    if (profile.role === "super_admin") return true;
+    if (!viewPermissionsLoaded) return false; // tunggu sampai data selesai dimuat
+    if (!viewRestrictedBookIds) return true;
+    if (!viewRestrictedBookIds.has(bookId)) return true; // tidak di-restrict
+    return userViewAllowedBookIds.has(bookId);
+  }
+
   const topLevelBooks = getTopLevelBooks();
   const newGroupCandidates = getAvailableBooksForGroup();
   const editGroupCandidates = getAvailableBooksForGroup(editingBookId);
 
+  // Tampilkan skeleton cards saat view permissions belum selesai dimuat
+  const visibleBooks = viewPermissionsLoaded
+    ? topLevelBooks.filter((b) => canViewBook(b.id))
+    : null; // null = belum siap
+
   return (
     <div className="relative grid gap-4 overflow-x-hidden">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-        {topLevelBooks.map((b) => {
+        {visibleBooks === null ? (
+          // Skeleton — jumlah sesuai total buku agar layout tidak loncat
+          Array.from({ length: Math.max(2, topLevelBooks.length) }).map((_, i) => (
+            <div
+              key={i}
+              className="flex flex-col gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-4 animate-pulse"
+            >
+              <div className="h-4 rounded bg-slate-200 dark:bg-slate-700 w-3/4" />
+              <div className="mt-auto space-y-1.5">
+                <div className="h-2.5 rounded bg-slate-200 dark:bg-slate-700 w-1/3" />
+                <div className="h-4 rounded bg-slate-200 dark:bg-slate-700 w-1/2" />
+              </div>
+            </div>
+          ))
+        ) : visibleBooks.map((b) => {
           const isRoutineBook = b.type === "rutin";
           const isKolektifBook = b.type === "kolektif";
           const isGroupBook = b.type === "group";
@@ -1284,11 +1355,11 @@ export default function BukuKasPage() {
               }}
             />
           </div>
-          {/* Tombol atur admin — hanya untuk super_admin */}
+          {/* Tombol atur admin & izin lihat — hanya untuk super_admin */}
           {profile?.role === "super_admin" &&
             editingBookId &&
             editingBookType !== "group" && (
-              <div>
+              <div className="grid gap-2">
                 <Button
                   variant="secondary"
                   onClick={async () => {
@@ -1313,7 +1384,36 @@ export default function BukuKasPage() {
                   }}
                   className="w-full"
                 >
-                  Atur Admin
+                  Izin Edit
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={async () => {
+                    try {
+                      const [viewUserIds, allProfilesData] = await Promise.all([
+                        getBookViewPermissions(editingBookId!),
+                        getAllProfiles(),
+                      ]);
+                      setViewPermissionBookId(editingBookId);
+                      const adminOnly = isAdminOnlyBook(viewUserIds);
+                      setViewPermissionAdminOnly(adminOnly);
+                      // Filter out sentinel from displayed user ids
+                      setViewPermissionUserIds(new Set(viewUserIds.filter(id => id !== SUPER_ADMIN_ONLY_SENTINEL)));
+                      setAllNonAdminProfiles(
+                        allProfilesData.filter((p) => p.role !== "super_admin"),
+                      );
+                      setOpenViewPermissionModal(true);
+                    } catch (err) {
+                      console.error("Error loading view permissions:", err);
+                      alert(
+                        "Gagal memuat data: " +
+                          (err instanceof Error ? err.message : String(err)),
+                      );
+                    }
+                  }}
+                  className="w-full"
+                >
+                  Izin Lihat
                 </Button>
               </div>
             )}
@@ -1716,15 +1816,15 @@ export default function BukuKasPage() {
         </div>
       </Modal>
 
-      {/* Modal atur admin */}
+      {/* Modal atur admin (izin edit) */}
       <Modal
         open={openPermissionModal}
-        title="Atur Admin untuk Buku"
+        title="Izin Edit Buku"
         onClose={() => setOpenPermissionModal(false)}
       >
         <div className="grid gap-4">
-          <div className="text-xs text-slate-500">
-            Pilih admin yang boleh mengedit buku ini.
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Pilih admin yang boleh <span className="font-semibold text-slate-700 dark:text-slate-300">mengedit</span> buku ini.
           </div>
           {allAdminProfiles.length === 0 ? (
             <div className="px-4 py-6 text-center text-sm text-slate-500">
@@ -1783,6 +1883,161 @@ export default function BukuKasPage() {
                 } catch (error) {
                   console.error("Error saving permissions:", error);
                   alert("Gagal menyimpan pengaturan admin");
+                }
+              }}
+            >
+              Simpan
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal izin lihat buku */}
+      <Modal
+        open={openViewPermissionModal}
+        title="Izin Lihat Buku"
+        onClose={() => setOpenViewPermissionModal(false)}
+      >
+        <div className="grid gap-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Atur siapa yang boleh <span className="font-semibold text-slate-700 dark:text-slate-300">melihat</span> card buku ini.
+            Jika tidak ada restriksi, semua user bisa melihat.
+          </div>
+
+          {/* Tombol super admin only */}
+          <button
+            type="button"
+            onClick={() => {
+              setViewPermissionAdminOnly((prev) => {
+                if (!prev) {
+                  // Aktifkan admin only → clear semua pilihan user
+                  setViewPermissionUserIds(new Set());
+                }
+                return !prev;
+              });
+            }}
+            className={`flex items-center gap-3 w-full rounded-lg border px-3 py-2.5 text-left transition ${
+              viewPermissionAdminOnly
+                ? "border-rose-400 dark:border-rose-600 bg-rose-50 dark:bg-rose-900/20"
+                : "border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+            }`}
+          >
+            <div className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border-2 transition ${
+              viewPermissionAdminOnly
+                ? "border-rose-500 bg-rose-500"
+                : "border-slate-300 dark:border-slate-600"
+            }`}>
+              {viewPermissionAdminOnly && (
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" className="h-2.5 w-2.5">
+                  <path d="M20 6 9 17l-5-5"/>
+                </svg>
+              )}
+            </div>
+            <div>
+              <div className={`text-sm font-medium ${viewPermissionAdminOnly ? "text-rose-700 dark:text-rose-400" : "text-slate-700 dark:text-slate-300"}`}>
+                Hanya Super Admin
+              </div>
+              <div className="text-xs text-slate-400 dark:text-slate-500">
+                Semua user lain tidak bisa melihat buku ini
+              </div>
+            </div>
+          </button>
+
+          {/* Daftar user — disabled saat admin only aktif */}
+          {!viewPermissionAdminOnly && (
+            <>
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                Atau pilih user tertentu:
+              </div>
+              {allNonAdminProfiles.length === 0 ? (
+                <div className="px-4 py-6 text-center text-sm text-slate-500">
+                  Belum ada user terdaftar.
+                </div>
+              ) : (
+                <div className="grid gap-2 max-h-56 overflow-auto">
+                  {allNonAdminProfiles.map((p) => (
+                    <label
+                      key={p.id}
+                      className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={viewPermissionUserIds.has(p.id)}
+                        onChange={() => {
+                          setViewPermissionUserIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(p.id)) {
+                              next.delete(p.id);
+                            } else {
+                              next.add(p.id);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
+                          {p.full_name}
+                        </div>
+                        <div className="text-xs text-slate-400 truncate flex items-center gap-1.5">
+                          {p.email}
+                          <span className={`inline-block rounded px-1 py-0.5 text-[10px] font-medium ${p.role === "admin" ? "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400" : "bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400"}`}>
+                            {p.role === "admin" ? "Admin" : "Member"}
+                          </span>
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Status info */}
+          {viewPermissionAdminOnly ? (
+            <div className="rounded-lg bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 px-3 py-2 text-xs text-rose-700 dark:text-rose-400">
+              Buku ini hanya terlihat oleh Super Admin.
+            </div>
+          ) : viewPermissionUserIds.size > 0 ? (
+            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+              Hanya {viewPermissionUserIds.size} user yang dipilih bisa melihat buku ini (+ super admin).
+            </div>
+          ) : (
+            <div className="rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-3 py-2 text-xs text-slate-500 dark:text-slate-400">
+              Tidak ada restriksi — semua user bisa melihat buku ini.
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenViewPermissionModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={async () => {
+                if (!viewPermissionBookId) return;
+                try {
+                  if (viewPermissionAdminOnly) {
+                    await setBookViewPermissionsAdminOnly(viewPermissionBookId);
+                  } else {
+                    await setBookViewPermissions(viewPermissionBookId, [...viewPermissionUserIds]);
+                  }
+                  // Refresh view restrictions untuk user saat ini
+                  if (profile && profile.role !== "super_admin") {
+                    const [restrictedIds, allowedIds] = await Promise.all([
+                      getAllRestrictedBookIds(),
+                      getUserBookViewPermissions(profile.id),
+                    ]);
+                    setViewRestrictedBookIds(new Set(restrictedIds));
+                    setUserViewAllowedBookIds(new Set(allowedIds));
+                  }
+                  setOpenViewPermissionModal(false);
+                } catch (error) {
+                  console.error("Error saving view permissions:", error);
+                  alert("Gagal menyimpan pengaturan. Pastikan migration sudah dijalankan.");
                 }
               }}
             >

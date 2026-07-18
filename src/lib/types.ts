@@ -15,6 +15,12 @@ export type KolektifSession = {
   bookId: string;
   name: string;
   sortOrder: number;
+  profileId?: string; // ID user yang memiliki sub buku tabungan ini
+};
+
+export type KolektifRowExtraValue = {
+  value: string;
+  txType?: "masuk" | "keluar";
 };
 
 export type KolektifRow = {
@@ -25,7 +31,7 @@ export type KolektifRow = {
   noteValue?: number;
   note?: string;
   txType?: "masuk" | "keluar"; // hanya relevan saat nominalLabelType === "number"
-  extraValues?: Record<string, string>; // columnId → value (untuk extra columns)
+  extraValues?: Record<string, string | KolektifRowExtraValue>; // columnId → value (untuk extra columns) - backward compatible
 };
 
 export type KolektifColumnType = "text" | "number" | "date";

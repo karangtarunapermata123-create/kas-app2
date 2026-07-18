@@ -1,13 +1,43 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import Button from '../components/Button'
 import Input from '../components/Input'
 import Modal from '../components/Modal'
 import { useAuth } from '../lib/auth'
 import { updateUserName, ROLE_LABELS, ROLE_COLORS, ROLE_TEXT_COLORS } from '../lib/users'
 import { supabase } from '../lib/supabase'
+import { getUserKolektifSessions } from '../lib/store'
+
+// Reuse IconBook from App.tsx
+function IconBook(props: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
+    </svg>
+  )
+}
 
 export default function ProfilPage() {
+  const navigate = useNavigate()
   const { profile, user, signOut, refreshProfile } = useAuth()
+
+  const [hasTabungan, setHasTabungan] = useState(false)
+
+  useEffect(() => {
+    if (!profile) return
+    getUserKolektifSessions(profile.id).then((sessions) => {
+      setHasTabungan(sessions.length > 0)
+    }).catch(console.error)
+  }, [profile])
 
   // ── Modal edit profil ──────────────────────────────────────────────────────
   const [openEdit, setOpenEdit] = useState(false)
@@ -143,6 +173,27 @@ export default function ProfilPage() {
           </div>
         </div>
       </button>
+
+      {/* ── Tabungan Saya — hanya tampil jika user punya session tabungan ── */}
+      {hasTabungan && (
+        <button
+          type="button"
+          onClick={() => navigate('/tabungan-saya')}
+          className="w-full text-left rounded-xl border dark:border-slate-700 bg-white dark:bg-slate-800 shadow-sm transition hover:shadow-md hover:border-slate-300 dark:hover:border-slate-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20 dark:focus-visible:ring-slate-700/50"
+        >
+          <div className="flex items-center justify-between px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center text-slate-600 dark:text-slate-400">
+                <IconBook className="h-5 w-5" />
+              </div>
+              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Tabungan Saya</h2>
+            </div>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-slate-400 dark:text-slate-500">
+              <path d="m9 18 6-6-6-6" />
+            </svg>
+          </div>
+        </button>
+      )}
 
       {/* ── Modal Edit Profil ── */}
       <Modal open={openEdit} title="Edit Profil" onClose={closeModal}>

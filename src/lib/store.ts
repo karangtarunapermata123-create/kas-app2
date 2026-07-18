@@ -67,12 +67,32 @@ export async function getKolektifSessions(
     bookId: s.book_id,
     name: s.name,
     sortOrder: s.sort_order,
+    profileId: s.profile_id ?? undefined,
+  }));
+}
+
+export async function getUserKolektifSessions(
+  profileId: string,
+): Promise<KolektifSession[]> {
+  const { data, error } = await supabase
+    .from("kolektif_sessions")
+    .select("*")
+    .eq("profile_id", profileId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((s) => ({
+    id: s.id,
+    bookId: s.book_id,
+    name: s.name,
+    sortOrder: s.sort_order,
+    profileId: s.profile_id ?? undefined,
   }));
 }
 
 export async function addKolektifSession(
   bookId: string,
   name: string,
+  profileId?: string,
 ): Promise<KolektifSession> {
   const sessions = await getKolektifSessions(bookId);
   const nextOrder =
@@ -82,12 +102,14 @@ export async function addKolektifSession(
     bookId,
     name: name.trim(),
     sortOrder: nextOrder,
+    profileId,
   };
   const { error } = await supabase.from("kolektif_sessions").insert({
     id: session.id,
     book_id: bookId,
     name: session.name,
     sort_order: nextOrder,
+    profile_id: profileId ?? null,
   });
   if (error) throw error;
   return session;
@@ -231,9 +253,33 @@ export async function deleteKolektifExtraColumn(columnId: string): Promise<void>
   if (error) throw error;
 }
 
+/**
+ * Copy konfigurasi kolom (labels, tipe, extra columns) dari satu session ke session lain.
+ * Dipakai saat membuat sub-buku baru agar punya kolom yang sama dengan template.
+ */
+export async function copyKolektifConfig(
+  fromSessionId: string,
+  toSessionId: string,
+): Promise<void> {
+  const src = await getKolektifConfig(fromSessionId);
+  // Copy labels & types
+  await updateKolektifLabels(toSessionId, {
+    headerLabel: src.headerLabel,
+    nominalLabel: src.nominalLabel,
+    noteLabel: src.noteLabel,
+    headerLabelType: src.headerLabelType,
+    nominalLabelType: src.nominalLabelType,
+    noteLabelType: src.noteLabelType,
+  });
+  // Copy extra columns (tanpa rows)
+  for (const col of src.extraColumns) {
+    await addKolektifExtraColumn(toSessionId, col.label, col.columnType);
+  }
+}
+
 export async function saveKolektifRowExtraValues(
   rowId: string,
-  extraValues: Record<string, string>,
+  extraValues: Record<string, any>,
 ): Promise<void> {
   const { error } = await supabase
     .from("kolektif_rows")
@@ -304,7 +350,7 @@ export async function addKolektifRow(
   headerValue?: number,
   noteValue?: number,
   txType?: "masuk" | "keluar",
-): Promise<void> {
+): Promise<string> {
   const { data: existing } = await supabase
     .from("kolektif_rows")
     .select("sort_order")
@@ -345,6 +391,8 @@ export async function addKolektifRow(
       }
     }
   }
+  
+  return rowData.id;
 }
 
 export async function updateKolektifRow(
@@ -770,6 +818,88 @@ export async function getUserBookPermissions(
     .eq("user_id", userId);
   if (error) throw error;
   return (data ?? []).map((p) => p.book_id);
+}
+
+// UUID sentinel — dipakai sebagai marker "hanya super admin yang bisa lihat"
+export const SUPER_ADMIN_ONLY_SENTINEL = "00000000-0000-0000-0000-000000000000";
+
+// ─── Book View Permissions ────────────────────────────────────────────────────
+// Izin lihat card buku kas (terpisah dari izin edit).
+// Jika tidak ada entri untuk suatu buku → semua user bisa lihat.
+// Jika ada entri → hanya user yang terdaftar + super_admin yang bisa lihat.
+
+export async function getBookViewPermissions(bookId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("book_view_permissions")
+    .select("user_id")
+    .eq("book_id", bookId);
+  if (error) throw error;
+  return (data ?? []).map((p) => p.user_id);
+}
+
+export async function setBookViewPermissions(
+  bookId: string,
+  userIds: string[],
+): Promise<void> {
+  await supabase.from("book_view_permissions").delete().eq("book_id", bookId);
+  if (userIds.length === 0) return;
+  const rows = userIds.map((userId) => ({
+    id: uid("bvp"),
+    book_id: bookId,
+    user_id: userId,
+  }));
+  const { error } = await supabase.from("book_view_permissions").insert(rows);
+  if (error) throw error;
+}
+
+/**
+ * Tandai buku sebagai "hanya super admin yang bisa lihat".
+ * Menyimpan sentinel UUID sehingga buku tetap ada di restricted list
+ * tapi tidak ada user biasa yang match.
+ */
+export async function setBookViewPermissionsAdminOnly(bookId: string): Promise<void> {
+  await supabase.from("book_view_permissions").delete().eq("book_id", bookId);
+  const { error } = await supabase.from("book_view_permissions").insert({
+    id: uid("bvp"),
+    book_id: bookId,
+    user_id: SUPER_ADMIN_ONLY_SENTINEL,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Cek apakah buku diset "super admin only".
+ */
+export function isAdminOnlyBook(viewUserIds: string[]): boolean {
+  return viewUserIds.includes(SUPER_ADMIN_ONLY_SENTINEL) && viewUserIds.length === 1;
+}
+
+/**
+ * Ambil semua book_id yang user ini punya izin lihat.
+ * Jika sebuah buku tidak punya entri sama sekali → dianggap boleh dilihat semua orang.
+ * Fungsi ini hanya mengembalikan book_id yang secara eksplisit di-restrict.
+ */
+export async function getUserBookViewPermissions(
+  userId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("book_view_permissions")
+    .select("book_id")
+    .eq("user_id", userId);
+  if (error) throw error;
+  return (data ?? []).map((p) => p.book_id);
+}
+
+/**
+ * Ambil semua book_id yang MEMILIKI restriksi lihat (ada minimal 1 entri di book_view_permissions).
+ * Dipakai untuk mengetahui buku mana saja yang perlu dicek izin lihatnya.
+ */
+export async function getAllRestrictedBookIds(): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("book_view_permissions")
+    .select("book_id");
+  if (error) throw error;
+  return [...new Set((data ?? []).map((p) => p.book_id))];
 }
 
 // ─── Routine Members ──────────────────────────────────────────────────────────

@@ -6,12 +6,18 @@ import Modal from "../components/Modal";
 import TransactionsPage from "./TransactionsPage";
 import RoutineBookPage from "./RoutineBookPage";
 import { useAuth, canEditBook } from "../lib/auth";
+import type { Profile } from "../lib/auth";
 import {
   getKolektifSessions,
   addKolektifSession,
   renameKolektifSession,
   deleteKolektifSession,
   getKolektifConfig,
+  copyKolektifConfig,
+  updateKolektifLabels,
+  addKolektifExtraColumn,
+  updateKolektifExtraColumn,
+  deleteKolektifExtraColumn,
   getBooks,
   getTransactions,
   getKolektifLinkedBooks,
@@ -23,8 +29,9 @@ import {
   saveBookTabLabel,
   getBookSaldo,
 } from "../lib/store";
+import { getAllProfiles } from "../lib/users";
 import { formatIDR } from "../lib/money";
-import type { Book, KolektifSession } from "../lib/types";
+import type { Book, KolektifSession, KolektifColumnType, KolektifExtraColumn } from "../lib/types";
 
 // Komponen untuk render buku rutinan yang di-link
 function LinkedRoutineView({ bookId }: { bookId: string }) {
@@ -122,6 +129,11 @@ export default function KolektifPage() {
   const [openRenameKolektifModal, setOpenRenameKolektifModal] = useState(false);
   const [renameKolektifInput, setRenameKolektifInput] = useState("");
 
+  // Modal mode tabungan
+  const [openModeTabunganModal, setOpenModeTabunganModal] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [selectedProfileIds, setSelectedProfileIds] = useState<Set<string>>(new Set());
+
   // Modal info/aksi buku transaksi aktif
   const [openLinkedBookModal, setOpenLinkedBookModal] = useState(false);
 
@@ -171,6 +183,20 @@ export default function KolektifPage() {
   // Modal tambah sub-buku
   const [openAddModal, setOpenAddModal] = useState(false);
   const [newName, setNewName] = useState("");
+
+  // Modal atur kolom template (wajib sebelum buat sub-buku pertama)
+  const [openTemplateColumnModal, setOpenTemplateColumnModal] = useState(false);
+  // "add" = lanjut ke tambah manual, "tabungan" = lanjut ke mode tabungan
+  const [templateNextAction, setTemplateNextAction] = useState<"add" | "tabungan">("add");
+  const [tmplHeaderLabel, setTmplHeaderLabel] = useState("Nama");
+  const [tmplNominalLabel, setTmplNominalLabel] = useState("Nominal");
+  const [tmplNoteLabel, setTmplNoteLabel] = useState("Keterangan");
+  const [tmplHeaderType, setTmplHeaderType] = useState<KolektifColumnType>("text");
+  const [tmplNominalType, setTmplNominalType] = useState<KolektifColumnType>("number");
+  const [tmplNoteType, setTmplNoteType] = useState<KolektifColumnType>("text");
+  const [tmplExtraCols, setTmplExtraCols] = useState<Array<{ id: string; label: string; columnType: KolektifColumnType }>>([]);
+  const [tmplNewColLabel, setTmplNewColLabel] = useState("");
+  const [tmplNewColType, setTmplNewColType] = useState<KolektifColumnType>("text");
 
   // Modal rename sub-buku
   const [openRenameModal, setOpenRenameModal] = useState(false);
@@ -242,12 +268,35 @@ export default function KolektifPage() {
       list.map(async (s) => {
         const cfg = await getKolektifConfig(s.id);
         totals[s.id] = cfg.rows.reduce((sum, r) => {
-          let rowTotal = r.amount;
+          let rowTotal = 0;
           if (cfg.headerLabelType === "number") {
             rowTotal += (r.headerValue ?? (Number(r.label) || 0));
           }
+          if (cfg.nominalLabelType === "number") {
+            const sign = r.txType === "keluar" ? -1 : 1;
+            rowTotal += sign * r.amount;
+          } else {
+            rowTotal += r.amount;
+          }
           if (cfg.noteLabelType === "number") {
             rowTotal += (r.noteValue ?? (Number(r.note) || 0));
+          }
+          for (const col of cfg.extraColumns) {
+            if (col.columnType === "number") {
+              const extraVal = r.extraValues?.[col.id];
+              let val: number;
+              let txType: "masuk" | "keluar" = "masuk";
+              if (typeof extraVal === "string") {
+                val = Number(extraVal);
+              } else if (extraVal && typeof extraVal === "object") {
+                val = Number(extraVal.value);
+                txType = extraVal.txType || "masuk";
+              } else {
+                val = 0;
+              }
+              const sign = txType === "keluar" ? -1 : 1;
+              rowTotal += Number.isFinite(val) ? sign * val : 0;
+            }
           }
           return sum + rowTotal;
         }, 0);
@@ -419,10 +468,89 @@ export default function KolektifPage() {
     if (!name) return;
     setSaving(true);
     try {
-      await addKolektifSession(safeBookId, name);
+      const newSession = await addKolektifSession(safeBookId, name);
+      // Copy config kolom dari session pertama (template) jika ada session lain
+      const existingSessions = sessions.filter((s) => s.id !== newSession.id);
+      if (existingSessions.length > 0) {
+        await copyKolektifConfig(existingSessions[0].id, newSession.id);
+      }
       await refresh();
       setNewName("");
       setOpenAddModal(false);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /**
+   * Cek apakah sudah ada sessions. Kalau belum ada → wajib atur kolom template dulu.
+   * Kalau sudah ada → langsung buka modal target.
+   */
+  function requireColumnSetup(nextAction: "add" | "tabungan") {
+    if (sessions.length === 0) {
+      // Belum ada session → wajib atur kolom template dulu
+      setTmplHeaderLabel("Nama");
+      setTmplNominalLabel("Nominal");
+      setTmplNoteLabel("Keterangan");
+      setTmplHeaderType("text");
+      setTmplNominalType("number");
+      setTmplNoteType("text");
+      setTmplExtraCols([]);
+      setTmplNewColLabel("");
+      setTmplNewColType("text");
+      setTemplateNextAction(nextAction);
+      setOpenTemplateColumnModal(true);
+    } else {
+      // Sudah ada session → kolom sudah pernah diset, langsung ke aksi
+      if (nextAction === "add") {
+        setNewName("");
+        setOpenAddModal(true);
+      } else {
+        openModeTabungan();
+      }
+    }
+  }
+
+  async function openModeTabungan() {
+    try {
+      const allProfiles = await getAllProfiles();
+      setProfiles(allProfiles);
+      setSelectedProfileIds(new Set());
+      setOpenModeTabunganModal(true);
+    } catch (e) {
+      console.error("Gagal memuat daftar user:", e);
+    }
+  }
+
+  /**
+   * Simpan kolom template lalu buat session dummy untuk menyimpan config,
+   * kemudian lanjut ke aksi berikutnya.
+   */
+  async function saveTemplateAndContinue() {
+    setSaving(true);
+    try {
+      // Buat session dummy bernama "__template__" untuk menyimpan config kolom
+      const templateSession = await addKolektifSession(safeBookId, "__template__");
+      await updateKolektifLabels(templateSession.id, {
+        headerLabel: tmplHeaderLabel,
+        nominalLabel: tmplNominalLabel,
+        noteLabel: tmplNoteLabel,
+        headerLabelType: tmplHeaderType,
+        nominalLabelType: tmplNominalType,
+        noteLabelType: tmplNoteType,
+      });
+      for (const col of tmplExtraCols) {
+        await addKolektifExtraColumn(templateSession.id, col.label, col.columnType);
+      }
+      await refresh();
+      setOpenTemplateColumnModal(false);
+
+      if (templateNextAction === "add") {
+        setNewName("");
+        setOpenAddModal(true);
+      } else {
+        await openModeTabungan();
+      }
     } finally {
       setSaving(false);
     }
@@ -907,7 +1035,7 @@ export default function KolektifPage() {
             {userCanEdit && (
               <button
                 type="button"
-                onClick={() => { setNewName(""); setOpenAddModal(true); }}
+                onClick={() => { setNewName(""); requireColumnSetup("add"); }}
                 className="fixed bottom-[calc(4rem+env(safe-area-inset-bottom))] right-6 z-50 md:bottom-6 flex h-14 w-14 items-center justify-center rounded-full bg-slate-900 dark:bg-slate-700 text-white shadow-lg hover:bg-slate-800 dark:hover:bg-slate-600 transition active:scale-95"
                 title="Tambah Sub-buku"
               >
@@ -971,6 +1099,157 @@ export default function KolektifPage() {
         </div>
       </div>
 
+      {/* Modal atur kolom template — wajib sebelum buat sub-buku pertama */}
+      <Modal
+        open={openTemplateColumnModal}
+        title="Atur Kolom Sub-Buku"
+        onClose={() => setOpenTemplateColumnModal(false)}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Atur nama dan tipe kolom. Semua sub-buku yang dibuat akan pakai settingan ini.
+          </p>
+
+          {/* Kolom 1 */}
+          <div className="grid gap-1.5">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 1 (Header)</div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
+                value={tmplHeaderLabel}
+                onChange={(e) => setTmplHeaderLabel(e.target.value)}
+                placeholder="Nama"
+              />
+              <select
+                value={tmplHeaderType}
+                onChange={(e) => setTmplHeaderType(e.target.value as KolektifColumnType)}
+                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka</option>
+                <option value="date">Tanggal</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Kolom 2 */}
+          <div className="grid gap-1.5">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 2 (Nominal)</div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
+                value={tmplNominalLabel}
+                onChange={(e) => setTmplNominalLabel(e.target.value)}
+                placeholder="Nominal"
+              />
+              <select
+                value={tmplNominalType}
+                onChange={(e) => setTmplNominalType(e.target.value as KolektifColumnType)}
+                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Kolom 3 */}
+          <div className="grid gap-1.5">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 3 (Keterangan)</div>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
+                value={tmplNoteLabel}
+                onChange={(e) => setTmplNoteLabel(e.target.value)}
+                placeholder="Keterangan"
+              />
+              <select
+                value={tmplNoteType}
+                onChange={(e) => setTmplNoteType(e.target.value as KolektifColumnType)}
+                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka</option>
+                <option value="date">Tanggal</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Extra columns */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-3 grid gap-2">
+            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom Tambahan</div>
+            {tmplExtraCols.map((col) => (
+              <div key={col.id} className="flex items-center gap-2">
+                <input
+                  className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
+                  value={col.label}
+                  onChange={(e) => setTmplExtraCols((prev) => prev.map((c) => c.id === col.id ? { ...c, label: e.target.value } : c))}
+                />
+                <select
+                  value={col.columnType}
+                  onChange={(e) => setTmplExtraCols((prev) => prev.map((c) => c.id === col.id ? { ...c, columnType: e.target.value as KolektifColumnType } : c))}
+                  className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+                >
+                  <option value="text">Text</option>
+                  <option value="number">Angka</option>
+                  <option value="date">Tanggal</option>
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setTmplExtraCols((prev) => prev.filter((c) => c.id !== col.id))}
+                  className="rounded p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                    <path d="M18 6 6 18M6 6l12 12"/>
+                  </svg>
+                </button>
+              </div>
+            ))}
+            <div className="flex gap-2">
+              <input
+                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
+                placeholder="Nama kolom baru..."
+                value={tmplNewColLabel}
+                onChange={(e) => setTmplNewColLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && tmplNewColLabel.trim()) {
+                    setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
+                    setTmplNewColLabel("");
+                  }
+                }}
+              />
+              <select
+                value={tmplNewColType}
+                onChange={(e) => setTmplNewColType(e.target.value as KolektifColumnType)}
+                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+              >
+                <option value="text">Text</option>
+                <option value="number">Angka</option>
+                <option value="date">Tanggal</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!tmplNewColLabel.trim()) return;
+                  setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
+                  setTmplNewColLabel("");
+                }}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+              >
+                + Tambah
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
+            <Button variant="secondary" onClick={() => setOpenTemplateColumnModal(false)}>Batal</Button>
+            <Button onClick={saveTemplateAndContinue} disabled={saving}>
+              {saving ? "Menyimpan..." : "Lanjut →"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Modal tambah sub-buku */}
       <Modal open={openAddModal} title="Tambah Sub-buku" onClose={() => setOpenAddModal(false)}>
         <div className="grid gap-4">
@@ -983,7 +1262,6 @@ export default function KolektifPage() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-              autoFocus
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -1006,7 +1284,6 @@ export default function KolektifPage() {
               value={renameInput}
               onChange={(e) => setRenameInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRename()}
-              autoFocus
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -1360,7 +1637,6 @@ export default function KolektifPage() {
               value={newLinkedSubName}
               onChange={(e) => setNewLinkedSubName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAddLinkedSub()}
-              autoFocus
             />
           </div>
           <div className="flex justify-end gap-2">
@@ -1536,13 +1812,109 @@ export default function KolektifPage() {
               value={renameKolektifInput}
               onChange={(e) => setRenameKolektifInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleRenameKolektif()}
-              autoFocus
             />
           </div>
           <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setOpenRenameKolektifModal(false);
+                requireColumnSetup("tabungan");
+              }}
+            >
+              Mode Tabungan
+            </Button>
             <Button variant="secondary" onClick={() => setOpenRenameKolektifModal(false)}>Batal</Button>
             <Button onClick={handleRenameKolektif} disabled={!renameKolektifInput.trim() || saving}>
               {saving ? "Menyimpan..." : "Simpan"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal mode tabungan */}
+      <Modal
+        open={openModeTabunganModal}
+        title="Mode Tabungan"
+        onClose={() => setOpenModeTabunganModal(false)}
+      >
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Pilih anggota untuk membuat sub buku sesuai nama mereka.
+          </p>
+          <div className="max-h-[50vh] overflow-y-auto space-y-2 border dark:border-slate-700 rounded-lg p-3">
+            {profiles.length === 0 ? (
+              <div className="text-sm text-slate-400 text-center py-4">
+                Belum ada user yang terdaftar.
+              </div>
+            ) : (
+              [...profiles]
+                .sort((a, b) => a.full_name.localeCompare(b.full_name, "id"))
+                .map((profile) => {
+                  const isChecked = selectedProfileIds.has(profile.id);
+                  return (
+                    <label
+                      key={profile.id}
+                      className="flex items-center gap-3 rounded-lg border dark:border-slate-700 px-3 py-3 hover:bg-slate-50 dark:hover:bg-slate-700 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={(e) => {
+                          setSelectedProfileIds((prev) => {
+                            const next = new Set(prev);
+                            if (e.target.checked) {
+                              next.add(profile.id);
+                            } else {
+                              next.delete(profile.id);
+                            }
+                            return next;
+                          });
+                        }}
+                        className="h-4 w-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900"
+                      />
+                      <span className="text-sm font-medium text-slate-900 dark:text-white">
+                        {profile.full_name}
+                      </span>
+                    </label>
+                  );
+                })
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setOpenModeTabunganModal(false)}
+            >
+              Batal
+            </Button>
+            <Button
+              onClick={async () => {
+                if (selectedProfileIds.size === 0) return;
+                setSaving(true);
+                try {
+                  // Buat sub buku untuk setiap user yang dipilih
+                  const selectedProfiles = profiles.filter((p) => selectedProfileIds.has(p.id));
+                  // Gunakan session pertama (template) sebagai acuan kolom
+                  const templateSession = sessions[0] ?? null;
+                  for (const prof of selectedProfiles) {
+                    const newSession = await addKolektifSession(safeBookId, prof.full_name, prof.id);
+                    if (templateSession) {
+                      await copyKolektifConfig(templateSession.id, newSession.id);
+                    }
+                  }
+                  await refresh();
+                  setOpenModeTabunganModal(false);
+                } catch (e) {
+                  console.error("Gagal membuat sub buku:", e);
+                  alert("Gagal membuat sub buku: " + (e as Error).message);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              disabled={selectedProfileIds.size === 0 || saving}
+            >
+              {saving ? "Membuat..." : "Buat Sub Buku"}
             </Button>
           </div>
         </div>

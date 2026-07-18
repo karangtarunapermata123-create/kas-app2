@@ -17,6 +17,7 @@ import KolektifPage from "./pages/KolektifPage";
 import KolektifSessionPage from "./pages/KolektifSessionPage";
 import LoginPage from "./pages/LoginPage";
 import BookGroupPage from "./pages/BookGroupPage";
+import TabunganSayaPage from "./pages/TabunganSayaPage";
 import RequireAuth from "./components/RequireAuth";
 import { getActivities, getBooks, getSessionsByActivity } from "./lib/store";
 import { useAuth } from "./lib/auth";
@@ -205,17 +206,23 @@ function AppShell() {
         const books = await getBooks();
         const sessionBook = books.find((b) => b.id === parts[1]);
         title = sessionBook?.name ?? "Buku Kolektif";
-        // Kalau buku ini punya groupId yang mengarah ke kolektif lain,
-        // kembali ke kolektif parent, bukan ke diri sendiri
-        if (sessionBook?.groupId) {
-          const parent = books.find((b) => b.id === sessionBook.groupId);
-          if (parent?.type === "kolektif") {
-            backTo = `/buku-kas-kolektif/${parent.id}`;
+        
+        // Cek apakah datang dari Tabungan Saya
+        if (location.state?.fromTabunganSaya) {
+          backTo = "/profil";
+        } else {
+          // Kalau buku ini punya groupId yang mengarah ke kolektif lain,
+          // kembali ke kolektif parent, bukan ke diri sendiri
+          if (sessionBook?.groupId) {
+            const parent = books.find((b) => b.id === sessionBook.groupId);
+            if (parent?.type === "kolektif") {
+              backTo = `/buku-kas-kolektif/${parent.id}`;
+            } else {
+              backTo = `/buku-kas-kolektif/${parts[1]}`;
+            }
           } else {
             backTo = `/buku-kas-kolektif/${parts[1]}`;
           }
-        } else {
-          backTo = `/buku-kas-kolektif/${parts[1]}`;
         }
       } else if (parts[0] === "buku-kas-kolektif" && parts[1]) {
         const books = await getBooks();
@@ -246,6 +253,9 @@ function AppShell() {
         backTo = "/pengaturan";
       } else if (parts[0] === "profil") {
         title = "Profil";
+      } else if (parts[0] === "tabungan-saya") {
+        title = "Tabungan Saya";
+        backTo = "/profil";
       }
 
       if (!cancelled) {
@@ -460,6 +470,7 @@ function AppShell() {
               <Route path="/pengaturan" element={<PengaturanPage />} />
               <Route path="/kelola-user" element={<KelolaUserPage />} />
               <Route path="/profil" element={<ProfilPage />} />
+              <Route path="/tabungan-saya" element={<TabunganSayaPage />} />
             </Routes>
           </main>
 
