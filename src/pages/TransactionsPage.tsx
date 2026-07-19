@@ -374,6 +374,17 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
     };
   }, [bookId]);
 
+  const initialLoadRef = useRef(true);
+
+  useEffect(() => {
+    if (initialLoadRef.current && transactions.length > 0) {
+      initialLoadRef.current = false;
+      const t = setTimeout(recalcTableHeight, 50);
+      return () => clearTimeout(t);
+    }
+    return undefined;
+  }, [transactions.length, recalcTableHeight]);
+
   // Load categories on mount and whenever transactions change
   useEffect(() => {
     getCategories(bookId).then(setCategories);
@@ -1253,20 +1264,19 @@ export default function TransactionsPage({ bookId, mode = "semua", embedded = fa
       )}
       </div>{/* end aboveTableRef */}
 
-      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 flex flex-col" style={{ minHeight: 0, flex: embedded ? "1 1 0" : undefined }}>
+      <div className="min-w-0 rounded-xl border bg-white shadow-sm dark:border-slate-700 dark:bg-slate-800 flex flex-col overflow-hidden" style={{ minHeight: 0, flex: "1 1 0" }}>
         {displayed.length === 0 ? (
-          <div className="px-4 py-6 text-sm text-slate-600">
+          <div className="px-4 py-6 text-sm text-slate-600 flex-1 flex items-center justify-center">
             {mode === "rekening"
               ? "Belum ada transaksi rekening."
               : "Belum ada transaksi tunai."}
           </div>
         ) : (
           <div
-            className="w-full min-w-0 overflow-auto"
+            className="w-full min-w-0 flex-1 overflow-x-auto overflow-y-auto"
             style={{
-              maxHeight: embedded ? undefined : tableMaxHeight,
-              flex: embedded ? "1 1 0" : undefined,
-              minHeight: embedded ? 0 : undefined,
+              flex: "1 1 0",
+              minHeight: 0,
             }}
           >
             <table className="w-full text-left text-sm">

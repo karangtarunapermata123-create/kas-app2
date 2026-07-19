@@ -60,6 +60,7 @@ type AttendanceTableProps = {
     profileId: string,
     memberName: string,
     currentStatus: AttendanceRecord["status"] | null,
+    currentFineAmount?: number,
   ) => void;
   canEdit: boolean;
 };
@@ -70,41 +71,40 @@ function AttendanceTable({
   onOpenStatus,
   canEdit,
 }: AttendanceTableProps) {
-  // Buat map dari records untuk lookup cepat berdasarkan nama
   const recordMap = new Map<string, AttendanceRecord>();
   records.forEach((r) => {
     recordMap.set(r.memberName.toLowerCase().trim(), r);
   });
 
-  // Hitung statistik
   const hadirCount = records.filter((r) => r.status === "hadir").length;
   const izinCount = records.filter((r) => r.status === "izin").length;
+  const dendaCount = records.filter((r) => r.status === "denda").length;
+  const totalDenda = records.reduce((sum, r) => r.status === "denda" ? sum + (r.fineAmount ?? 0) : sum, 0);
 
   return (
     <>
       {/* Ringkasan */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-4 py-3 shadow-sm">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Total
-          </div>
-          <div className="text-xl font-semibold text-slate-900 dark:text-white">
-            {allProfiles.length}
-          </div>
+      <div className="grid grid-cols-4 gap-2">
+        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-3 py-2.5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Total</div>
+          <div className="text-xl font-semibold text-slate-900 dark:text-white">{allProfiles.length}</div>
         </div>
-        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-4 py-3 shadow-sm">
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            Hadir
-          </div>
-          <div className="text-xl font-semibold text-emerald-600">
-            {hadirCount}
-          </div>
+        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-3 py-2.5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Hadir</div>
+          <div className="text-xl font-semibold text-emerald-600">{hadirCount}</div>
         </div>
-        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-4 py-3 shadow-sm">
+        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-3 py-2.5 shadow-sm">
           <div className="text-xs text-slate-500 dark:text-slate-400">Izin</div>
-          <div className="text-xl font-semibold text-amber-500">
-            {izinCount}
+          <div className="text-xl font-semibold text-amber-500">{izinCount}</div>
+        </div>
+        <div className="rounded-xl border bg-white dark:bg-slate-800 dark:border-slate-700 px-3 py-2.5 shadow-sm">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Denda</div>
+          <div className="text-lg font-semibold text-orange-500">
+            {dendaCount > 0 ? `${dendaCount}` : "0"}
           </div>
+          {totalDenda > 0 && (
+            <div className="text-[10px] text-orange-400 tabular-nums">Rp {totalDenda.toLocaleString("id-ID")}</div>
+          )}
         </div>
       </div>
 
@@ -126,53 +126,45 @@ function AttendanceTable({
               </thead>
               <tbody>
                 {[...allProfiles].sort((a, b) => a.full_name.localeCompare(b.full_name, "id")).map((profile, i) => {
-                  const record = recordMap.get(
-                    profile.full_name.toLowerCase().trim(),
-                  );
-                  const status = record?.status ?? null; // null = belum ada data
+                  const record = recordMap.get(profile.full_name.toLowerCase().trim());
+                  const status = record?.status ?? null;
+                  const fineAmount = record?.fineAmount;
 
                   return (
-                    <tr
-                      key={profile.id}
-                      className="border-t dark:border-slate-700"
-                    >
-                      <td className="py-2 pr-3 text-slate-400 dark:text-slate-500">
-                        {i + 1}
-                      </td>
-                      <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">
-                        {profile.full_name}
-                      </td>
+                    <tr key={profile.id} className="border-t dark:border-slate-700">
+                      <td className="py-2 pr-3 text-slate-400 dark:text-slate-500">{i + 1}</td>
+                      <td className="py-2 pr-3 font-medium text-slate-900 dark:text-white">{profile.full_name}</td>
                       <td className="py-2 pr-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() =>
-                            canEdit &&
-                            onOpenStatus(profile.id, profile.full_name, status)
-                          }
-                          disabled={!canEdit}
-                          className={`inline-flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition ${
-                            canEdit
-                              ? "hover:scale-110 cursor-pointer"
-                              : "cursor-not-allowed opacity-60"
-                          } ${
-                            status === "hadir"
-                              ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                              : status === "tidak-hadir"
-                              ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
-                              : status === "izin"
-                              ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                          }`}
-                          aria-label="Ubah status kehadiran"
-                        >
-                          {status === "hadir"
-                            ? "✓"
-                            : status === "izin"
-                              ? "~"
-                              : status === "tidak-hadir"
-                                ? "✗"
-                                : ""}
-                        </button>
+                        {status === "denda" ? (
+                          <button
+                            type="button"
+                            onClick={() => canEdit && onOpenStatus(profile.id, profile.full_name, status, fineAmount)}
+                            disabled={!canEdit}
+                            className={`text-sm font-bold tabular-nums text-rose-600 dark:text-rose-400 transition ${canEdit ? "hover:text-rose-800 cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                          >
+                            {fineAmount ? `Rp ${fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => canEdit && onOpenStatus(profile.id, profile.full_name, status)}
+                            disabled={!canEdit}
+                            className={`inline-flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition ${
+                              canEdit ? "hover:scale-110 cursor-pointer" : "cursor-not-allowed opacity-60"
+                            } ${
+                              status === "hadir"
+                                ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                : status === "tidak-hadir"
+                                ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                : status === "izin"
+                                ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                            }`}
+                            aria-label="Ubah status kehadiran"
+                          >
+                            {status === "hadir" ? "✓" : status === "izin" ? "~" : status === "tidak-hadir" ? "✗" : ""}
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -192,8 +184,9 @@ type StatusModalProps = {
   open: boolean;
   memberName: string | null;
   currentStatus: AttendanceRecord["status"] | null;
+  currentFineAmount?: number;
   onClose: () => void;
-  onSet: (status: AttendanceRecord["status"]) => void;
+  onSet: (status: AttendanceRecord["status"], fineAmount?: number) => void;
   onDelete: () => void;
 };
 
@@ -201,10 +194,28 @@ function StatusModal({
   open,
   memberName,
   currentStatus,
+  currentFineAmount,
   onClose,
   onSet,
   onDelete,
 }: StatusModalProps) {
+  const [fineInput, setFineInput] = useState("");
+  const [showFineInput, setShowFineInput] = useState(false);
+
+  // Reset saat modal dibuka
+  useEffect(() => {
+    if (open) {
+      if (currentStatus === "denda") {
+        // Sudah ada denda — langsung tampilkan input dengan nilai yang ada
+        setFineInput(currentFineAmount != null ? String(currentFineAmount) : "");
+        setShowFineInput(true);
+      } else {
+        setFineInput("");
+        setShowFineInput(false);
+      }
+    }
+  }, [open, currentStatus, currentFineAmount]);
+
   return (
     <Modal
       open={open}
@@ -215,60 +226,110 @@ function StatusModal({
         {(
           [
             {
-              status: "hadir",
+              status: "hadir" as const,
               label: "Hadir",
               desc: "Anggota hadir dalam kegiatan ini",
-              color:
-                "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+              color: "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30",
             },
             {
-              status: "izin",
+              status: "izin" as const,
               label: "Izin",
               desc: "Anggota tidak hadir dengan keterangan",
-              color:
-                "border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100",
+              color: "border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30",
             },
             {
-              status: "tidak-hadir",
+              status: "tidak-hadir" as const,
               label: "Tidak Hadir",
               desc: "Anggota tidak hadir tanpa keterangan",
-              color:
-                "border-rose-400 bg-rose-50 text-rose-700 hover:bg-rose-100",
+              color: "border-rose-400 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/30",
             },
-          ] as const
+          ]
         ).map(({ status, label, desc, color }) => (
           <button
             key={status}
             type="button"
-            onClick={() => onSet(status)}
+            onClick={() => {
+              setShowFineInput(false);
+              onSet(status);
+            }}
             className={`flex w-full items-center gap-3 rounded-lg border-2 px-4 py-3 text-left transition ${
               currentStatus === status
                 ? color
                 : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
             }`}
           >
-            <span
-              className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${
-                currentStatus === status
-                  ? color
-                  : "border-slate-300 text-slate-400"
-              }`}
-            >
+            <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${currentStatus === status ? color : "border-slate-300 text-slate-400"}`}>
               {status === "hadir" ? "✓" : status === "izin" ? "~" : "✗"}
             </span>
             <div>
               <div className="text-sm font-medium">{label}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                {desc}
-              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">{desc}</div>
             </div>
-            {currentStatus === status && (
-              <span className="ml-auto text-xs font-medium">Aktif</span>
-            )}
+            {currentStatus === status && <span className="ml-auto text-xs font-medium">Aktif</span>}
           </button>
         ))}
 
-        {/* Tombol Hapus - hanya tampil jika ada record */}
+        {/* Denda */}
+        <div className={`rounded-lg border-2 transition ${
+          currentStatus === "denda"
+            ? "border-orange-400 bg-orange-50 dark:bg-orange-900/20"
+            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+        }`}>
+          <button
+            type="button"
+            onClick={() => setShowFineInput((v) => !v)}
+            className="flex w-full items-center gap-3 px-4 py-3 text-left"
+          >
+            <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${
+              currentStatus === "denda"
+                ? "border-orange-400 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300"
+                : "border-slate-300 text-slate-400"
+            }`}>
+              Rp
+            </span>
+            <div className="flex-1">
+              <div className={`text-sm font-medium ${currentStatus === "denda" ? "text-orange-700 dark:text-orange-300" : "text-slate-700 dark:text-slate-300"}`}>
+                Denda
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {currentStatus === "denda" && currentFineAmount
+                  ? `Rp ${currentFineAmount.toLocaleString("id-ID")}`
+                  : "Masukkan nominal denda"}
+              </div>
+            </div>
+            {currentStatus === "denda" && <span className="ml-auto text-xs font-medium text-orange-600 dark:text-orange-400">Aktif</span>}
+          </button>
+
+          {/* Input nominal denda */}
+          {showFineInput && (
+            <div className="border-t border-slate-200 dark:border-slate-700 px-4 pb-3 pt-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">Rp</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={fineInput ? Number(fineInput).toLocaleString("id-ID") : ""}
+                    onChange={(e) => setFineInput(e.target.value.replace(/\D/g, ""))}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 py-2 pl-10 pr-3 text-sm text-slate-900 dark:text-white outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                    autoFocus
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!fineInput || Number(fineInput) <= 0}
+                  onClick={() => onSet("denda", Number(fineInput))}
+                  className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-40 transition"
+                >
+                  Simpan
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Tombol Hapus */}
         {currentStatus !== null && (
           <button
             type="button"
@@ -387,10 +448,9 @@ export default function AbsensiPage() {
   const [openStatus, setOpenStatus] = useState(false);
   const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
   const [activeMemberName, setActiveMemberName] = useState<string | null>(null);
-  const [activeStatus, setActiveStatus] = useState<
-    AttendanceRecord["status"] | null
-  >(null);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null); // For routine activities
+  const [activeStatus, setActiveStatus] = useState<AttendanceRecord["status"] | null>(null);
+  const [activeFineAmount, setActiveFineAmount] = useState<number | undefined>(undefined);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [openTooltipSessionId, setOpenTooltipSessionId] = useState<
     string | null
   >(null); // For session info tooltip
@@ -792,49 +852,44 @@ export default function AbsensiPage() {
     profileId: string,
     memberName: string,
     currentStatus: AttendanceRecord["status"] | null,
+    currentFineAmount?: number,
   ) {
     setActiveProfileId(profileId);
     setActiveMemberName(memberName);
     setActiveStatus(currentStatus);
+    setActiveFineAmount(currentFineAmount);
     setOpenStatus(true);
   }
 
-  async function handleSetStatus(status: AttendanceRecord["status"]) {
+  async function handleSetStatus(status: AttendanceRecord["status"], fineAmount?: number) {
     if (!activeProfileId || !activeMemberName || !activityId) return;
 
-    // Determine which sessionId to use
     const targetSessionId = activeSessionId || sessionId;
 
-    // Cari apakah sudah ada record untuk user ini di session ini
     let existingRecord: AttendanceRecord | undefined;
-
     if (targetSessionId) {
-      // For routine activities with sessions
       existingRecord = records.find(
-        (r) =>
-          r.sessionId === targetSessionId &&
-          r.memberName.toLowerCase().trim() ===
-            activeMemberName.toLowerCase().trim(),
+        (r) => r.sessionId === targetSessionId &&
+          r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim(),
       );
     } else {
-      // For one-time activities
       existingRecord = records.find(
-        (r) =>
-          r.memberName.toLowerCase().trim() ===
-          activeMemberName.toLowerCase().trim(),
+        (r) => r.memberName.toLowerCase().trim() === activeMemberName.toLowerCase().trim(),
       );
     }
 
     if (existingRecord) {
-      // Update record yang sudah ada - langsung update state untuk respons instan
-      await updateAttendanceRecord(existingRecord.id, { status });
+      await updateAttendanceRecord(existingRecord.id, {
+        status,
+        fineAmount: status === "denda" ? fineAmount : undefined,
+      });
     } else {
-      // Buat record baru
       await addAttendanceRecord({
         activityId,
         sessionId: targetSessionId,
         memberName: activeMemberName,
         status,
+        fineAmount: status === "denda" ? fineAmount : undefined,
       });
     }
 
@@ -843,6 +898,7 @@ export default function AbsensiPage() {
     setActiveProfileId(null);
     setActiveMemberName(null);
     setActiveStatus(null);
+    setActiveFineAmount(undefined);
     setActiveSessionId(null);
   }
 
@@ -880,10 +936,9 @@ export default function AbsensiPage() {
     setActiveProfileId(null);
     setActiveMemberName(null);
     setActiveStatus(null);
+    setActiveFineAmount(undefined);
     setActiveSessionId(null);
   }
-
-  // ── QR Code Handlers ────────────────────────────────────────────────────
 
   async function handleShowQR() {
     try {
@@ -1109,6 +1164,7 @@ export default function AbsensiPage() {
             open={openStatus}
             memberName={activeMemberName}
             currentStatus={activeStatus}
+            currentFineAmount={activeFineAmount}
             onClose={() => {
               setOpenStatus(false);
               setActiveProfileId(null);
@@ -1368,7 +1424,6 @@ export default function AbsensiPage() {
                                 </td>
                                 {/* Session attendance cells */}
                                 {sessions.map((session) => {
-                                  // Get attendance record for this profile in this session
                                   const sessionRecords = records.filter(
                                     (r) => r.sessionId === session.id,
                                   );
@@ -1378,6 +1433,7 @@ export default function AbsensiPage() {
                                       profile.full_name.toLowerCase().trim(),
                                   );
                                   const status = record?.status ?? null;
+                                  const fineAmount = record?.fineAmount;
 
                                   return (
                                     <td
@@ -1385,44 +1441,54 @@ export default function AbsensiPage() {
                                       className="border-b border-r border-slate-200 dark:border-slate-700 py-2"
                                     >
                                       <div className="flex items-center justify-center">
-                                        <button
-                                          type="button"
-                                          onClick={async () => {
-                                            if (!userCanEdit) return;
-                                            // Set context untuk modal
-                                            setActiveProfileId(profile.id);
-                                            setActiveMemberName(
-                                              profile.full_name,
-                                            );
-                                            setActiveStatus(status);
-                                            // Store sessionId untuk update
-                                            setActiveSessionId(session.id);
-                                            setOpenStatus(true);
-                                          }}
-                                          disabled={!userCanEdit}
-                                          className={`inline-flex h-7 w-7 items-center justify-center rounded border text-xs font-bold transition ${
-                                            userCanEdit
-                                              ? "hover:scale-110 cursor-pointer"
-                                              : "cursor-not-allowed opacity-60"
-                                          } ${
-                                            status === "hadir"
-                                              ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                                              : status === "tidak-hadir"
-                                              ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
-                                              : status === "izin"
-                                              ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                                              : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
-                                          }`}
-                                          aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
-                                        >
-                                          {status === "hadir"
-                                            ? "✓"
-                                            : status === "izin"
-                                              ? "~"
-                                              : status === "tidak-hadir"
-                                                ? "✗"
-                                                : ""}
-                                        </button>
+                                        {status === "denda" ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (!userCanEdit) return;
+                                              setActiveProfileId(profile.id);
+                                              setActiveMemberName(profile.full_name);
+                                              setActiveStatus(status);
+                                              setActiveFineAmount(fineAmount);
+                                              setActiveSessionId(session.id);
+                                              setOpenStatus(true);
+                                            }}
+                                            disabled={!userCanEdit}
+                                            className={`text-xs font-bold tabular-nums text-rose-600 dark:text-rose-400 transition leading-tight ${
+                                              userCanEdit ? "hover:text-rose-800 cursor-pointer" : "cursor-not-allowed opacity-60"
+                                            }`}
+                                          >
+                                            {fineAmount ? `Rp ${fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (!userCanEdit) return;
+                                              setActiveProfileId(profile.id);
+                                              setActiveMemberName(profile.full_name);
+                                              setActiveStatus(status);
+                                              setActiveFineAmount(undefined);
+                                              setActiveSessionId(session.id);
+                                              setOpenStatus(true);
+                                            }}
+                                            disabled={!userCanEdit}
+                                            className={`inline-flex h-7 w-7 items-center justify-center rounded border text-xs font-bold transition ${
+                                              userCanEdit ? "hover:scale-110 cursor-pointer" : "cursor-not-allowed opacity-60"
+                                            } ${
+                                              status === "hadir"
+                                                ? "border-emerald-400 dark:border-emerald-600 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                                : status === "tidak-hadir"
+                                                ? "border-rose-300 dark:border-rose-700 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                                : status === "izin"
+                                                ? "border-amber-300 dark:border-amber-600 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                                : "border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                                            }`}
+                                            aria-label={`Status kehadiran ${profile.full_name} - ${session.label}`}
+                                          >
+                                            {status === "hadir" ? "✓" : status === "izin" ? "~" : status === "tidak-hadir" ? "✗" : ""}
+                                          </button>
+                                        )}
                                       </div>
                                     </td>
                                   );
@@ -1572,6 +1638,7 @@ export default function AbsensiPage() {
                 open={openStatus}
                 memberName={activeMemberName}
                 currentStatus={activeStatus}
+                currentFineAmount={activeFineAmount}
                 onClose={() => {
                   setOpenStatus(false);
                   setActiveProfileId(null);
@@ -1610,6 +1677,7 @@ export default function AbsensiPage() {
                 open={openStatus}
                 memberName={activeMemberName}
                 currentStatus={activeStatus}
+                currentFineAmount={activeFineAmount}
                 onClose={() => {
                   setOpenStatus(false);
                   setActiveProfileId(null);

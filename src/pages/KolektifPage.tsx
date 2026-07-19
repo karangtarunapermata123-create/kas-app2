@@ -23,6 +23,14 @@ import {
   getKolektifLinkedBooks,
   getKolektifLinkedKolektifBooks,
   getKolektifLinkedRoutineBooks,
+  getKolektifLinkedActivities,
+  linkActivityToKolektif,
+  unlinkActivityFromKolektif,
+  updateLinkedActivityTabLabel,
+  getActivityFineTotal,
+  getActivities,
+  getAttendanceRecords,
+  getSessionsByActivity,
   linkBookToKolektif,
   unlinkBookFromKolektif,
   renameBook,
@@ -31,7 +39,8 @@ import {
 } from "../lib/store";
 import { getAllProfiles } from "../lib/users";
 import { formatIDR } from "../lib/money";
-import type { Book, KolektifSession, KolektifColumnType, KolektifExtraColumn } from "../lib/types";
+import type { Book, KolektifSession, KolektifColumnType, KolektifExtraColumn, Activity, ActivitySession, AttendanceRecord } from "../lib/types";
+import type { LinkedActivity } from "../lib/store";
 
 // Komponen untuk render buku rutinan yang di-link
 function LinkedRoutineView({ bookId }: { bookId: string }) {
@@ -116,7 +125,7 @@ export default function KolektifPage() {
   }, [profile, safeBookId]);
 
   // Tab state: "sub-buku" | "transaksi" | "kolektif" | "rutinan"
-  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif" | "rutinan">("sub-buku");
+  const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif" | "rutinan" | "absensi">("sub-buku");
   const [selectedLinkedBookId, setSelectedLinkedBookId] = useState<string | null>(null);
   const [selectedLinkedKolektifBookId, setSelectedLinkedKolektifBookId] = useState<string | null>(null);
 
@@ -180,6 +189,19 @@ export default function KolektifPage() {
   const [openAddRoutineBookModal, setOpenAddRoutineBookModal] = useState(false);
   const [availableRoutineBooks, setAvailableRoutineBooks] = useState<Book[]>([]);
   const [selectedRoutineBookId, setSelectedRoutineBookId] = useState<string>("");
+
+  // Linked activities (absensi)
+  const [linkedActivities, setLinkedActivities] = useState<LinkedActivity[]>([]);
+  const [linkedActivityFineTotals, setLinkedActivityFineTotals] = useState<Record<string, number>>({});
+  const [selectedLinkedActivityId, setSelectedLinkedActivityId] = useState<string | null>(null);
+  const [openAddActivityModal, setOpenAddActivityModal] = useState(false);
+  const [openUnlinkActivityModal, setOpenUnlinkActivityModal] = useState(false);
+  const [openLinkedActivityModal, setOpenLinkedActivityModal] = useState(false);
+  const [renameLinkedActivityTabInput, setRenameLinkedActivityTabInput] = useState("");
+  const [linkedActivityTabLabels, setLinkedActivityTabLabels] = useState<Record<string, string>>({});
+  const [allActivities, setAllActivities] = useState<Activity[]>([]);
+  const [linkedActivityRecords, setLinkedActivityRecords] = useState<Record<string, AttendanceRecord[]>>({});
+  const [linkedActivitySessions, setLinkedActivitySessions] = useState<Record<string, ActivitySession[]>>({});
   // Modal tambah sub-buku
   const [openAddModal, setOpenAddModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -197,6 +219,8 @@ export default function KolektifPage() {
   const [tmplExtraCols, setTmplExtraCols] = useState<Array<{ id: string; label: string; columnType: KolektifColumnType }>>([]);
   const [tmplNewColLabel, setTmplNewColLabel] = useState("");
   const [tmplNewColType, setTmplNewColType] = useState<KolektifColumnType>("text");
+  const [openTmplAddColModal, setOpenTmplAddColModal] = useState(false);
+  const [tmplEditingColId, setTmplEditingColId] = useState<string | null>(null);
 
   // Modal rename sub-buku
   const [openRenameModal, setOpenRenameModal] = useState(false);
@@ -351,6 +375,36 @@ export default function KolektifPage() {
     );
     setLinkedRoutineBookTotals(routineBookTotals);
 
+    // Load linked activities
+    const activities = await getKolektifLinkedActivities(safeBookId);
+    setLinkedActivities(activities);
+    // Restore tab labels from the loaded activities (tabLabel from DB)
+    const loadedTabLabels: Record<string, string> = {};
+    for (const a of activities) {
+      if (a.tabLabel) loadedTabLabels[a.id] = a.tabLabel;
+    }
+    setLinkedActivityTabLabels(loadedTabLabels);
+    setSelectedLinkedActivityId((prev) => {
+      if (prev && activities.some((a) => a.id === prev)) return prev;
+      return activities[0]?.id ?? null;
+    });
+
+    // Load fine totals dan records per activity
+    const fineTotals: Record<string, number> = {};
+    const activityRecordsMap: Record<string, AttendanceRecord[]> = {};
+    const activitySessionsMap: Record<string, ActivitySession[]> = {};
+    await Promise.all(
+      activities.map(async (a) => {
+        fineTotals[a.id] = await getActivityFineTotal(a.id);
+        const allRecs = await getAttendanceRecords();
+        activityRecordsMap[a.id] = allRecs.filter((r) => r.activityId === a.id);
+        activitySessionsMap[a.id] = await getSessionsByActivity(a.id);
+      }),
+    );
+    setLinkedActivityFineTotals(fineTotals);
+    setLinkedActivityRecords(activityRecordsMap);
+    setLinkedActivitySessions(activitySessionsMap);
+
     // Set selected linked book jika belum ada
     setSelectedLinkedBookId((prev) => {
       if (prev && linked.some((b) => b.id === prev)) return prev;
@@ -418,9 +472,46 @@ export default function KolektifPage() {
     (sum, b) => sum + (linkedRoutineBookTotals[b.id] ?? 0),
     0,
   );
-  const grandTotal = subBukuGrandTotal + linkedGrandTotal + linkedKolektifGrandTotal + linkedRoutineGrandTotal;
+  const linkedActivityFineGrandTotal = Object.values(linkedActivityFineTotals).reduce((sum, v) => sum + v, 0);
+  const grandTotal = subBukuGrandTotal + linkedGrandTotal + linkedKolektifGrandTotal + linkedRoutineGrandTotal + linkedActivityFineGrandTotal;
 
   // ── Routine book handlers ────────────────────────────────────────────────
+
+  async function openAddActivityModalFn() {
+    const all = await getActivities();
+    const linkedIds = new Set(linkedActivities.map((a) => a.id));
+    setAllActivities(all.filter((a) => !linkedIds.has(a.id)));
+    setOpenAddActivityModal(true);
+  }
+
+  async function handleLinkActivity(activityId: string) {
+    setSaving(true);
+    try {
+      await linkActivityToKolektif(activityId, safeBookId);
+      await refresh();
+      setOpenAddActivityModal(false);
+      setSelectedLinkedActivityId(activityId);
+      setActiveTab("absensi");
+    } catch (e) {
+      console.error("Gagal menghubungkan absensi:", e);
+      alert("Gagal menghubungkan absensi: " + ((e as Error)?.message || "Terjadi kesalahan"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleUnlinkActivity() {
+    if (!selectedLinkedActivityId) return;
+    setSaving(true);
+    try {
+      await unlinkActivityFromKolektif(selectedLinkedActivityId, safeBookId);
+      await refresh();
+      setOpenUnlinkActivityModal(false);
+      setActiveTab("sub-buku");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function openAddRoutineBookModalFn() {
     const all = await getBooks();
@@ -487,8 +578,39 @@ export default function KolektifPage() {
    * Kalau sudah ada → langsung buka modal target.
    */
   function requireColumnSetup(nextAction: "add" | "tabungan") {
-    if (sessions.length === 0) {
-      // Belum ada session → wajib atur kolom template dulu
+    // Selalu tampilkan modal atur kolom dulu.
+    // Kalau sudah ada session, pre-fill dari config session pertama.
+    const firstSession = sessions.find((s) => s.name !== "__template__") ?? sessions[0];
+    if (firstSession) {
+      // Load config dari session pertama sebagai default
+      getKolektifConfig(firstSession.id).then((cfg) => {
+        setTmplHeaderLabel(cfg.headerLabel);
+        setTmplNominalLabel(cfg.nominalLabel);
+        setTmplNoteLabel(cfg.noteLabel);
+        setTmplHeaderType(cfg.headerLabelType);
+        setTmplNominalType(cfg.nominalLabelType);
+        setTmplNoteType(cfg.noteLabelType);
+        setTmplExtraCols(cfg.extraColumns.map((c) => ({ id: c.id, label: c.label, columnType: c.columnType })));
+        setTmplNewColLabel("");
+        setTmplNewColType("text");
+        setTemplateNextAction(nextAction);
+        setOpenTemplateColumnModal(true);
+      }).catch(() => {
+        // Fallback ke default kalau gagal load
+        setTmplHeaderLabel("Nama");
+        setTmplNominalLabel("Nominal");
+        setTmplNoteLabel("Keterangan");
+        setTmplHeaderType("text");
+        setTmplNominalType("number");
+        setTmplNoteType("text");
+        setTmplExtraCols([]);
+        setTmplNewColLabel("");
+        setTmplNewColType("text");
+        setTemplateNextAction(nextAction);
+        setOpenTemplateColumnModal(true);
+      });
+    } else {
+      // Belum ada session sama sekali → pakai default
       setTmplHeaderLabel("Nama");
       setTmplNominalLabel("Nominal");
       setTmplNoteLabel("Keterangan");
@@ -500,14 +622,6 @@ export default function KolektifPage() {
       setTmplNewColType("text");
       setTemplateNextAction(nextAction);
       setOpenTemplateColumnModal(true);
-    } else {
-      // Sudah ada session → kolom sudah pernah diset, langsung ke aksi
-      if (nextAction === "add") {
-        setNewName("");
-        setOpenAddModal(true);
-      } else {
-        openModeTabungan();
-      }
     }
   }
 
@@ -529,8 +643,15 @@ export default function KolektifPage() {
   async function saveTemplateAndContinue() {
     setSaving(true);
     try {
-      // Buat session dummy bernama "__template__" untuk menyimpan config kolom
-      const templateSession = await addKolektifSession(safeBookId, "__template__");
+      // Cari session template yang sudah ada, atau buat baru kalau belum ada sama sekali
+      let templateSession = sessions.find((s) => s.name === "__template__") ?? sessions[0] ?? null;
+
+      if (!templateSession) {
+        // Belum ada session sama sekali → buat session dummy sebagai template
+        templateSession = await addKolektifSession(safeBookId, "__template__");
+      }
+
+      // Update config kolom di session template
       await updateKolektifLabels(templateSession.id, {
         headerLabel: tmplHeaderLabel,
         nominalLabel: tmplNominalLabel,
@@ -539,9 +660,16 @@ export default function KolektifPage() {
         nominalLabelType: tmplNominalType,
         noteLabelType: tmplNoteType,
       });
+
+      // Sync extra columns: hapus semua yang lama lalu tambah yang baru
+      const existingConfig = await getKolektifConfig(templateSession.id);
+      for (const col of existingConfig.extraColumns) {
+        await deleteKolektifExtraColumn(col.id);
+      }
       for (const col of tmplExtraCols) {
         await addKolektifExtraColumn(templateSession.id, col.label, col.columnType);
       }
+
       await refresh();
       setOpenTemplateColumnModal(false);
 
@@ -735,6 +863,26 @@ export default function KolektifPage() {
     }
   }
 
+  async function handleRenameLinkedActivityTab() {
+    if (!selectedLinkedActivityId) return;
+    const name = renameLinkedActivityTabInput.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const activity = linkedActivities.find((a) => a.id === selectedLinkedActivityId);
+      if (activity) {
+        await updateLinkedActivityTabLabel(activity.linkId, name);
+        setLinkedActivityTabLabels((prev) => ({ ...prev, [selectedLinkedActivityId]: name }));
+      }
+      setOpenLinkedActivityModal(false);
+    } catch (e) {
+      console.error("Gagal mengganti label tab absensi:", e);
+      alert("Gagal mengganti label: " + ((e as Error)?.message || "Terjadi kesalahan"));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
@@ -806,6 +954,23 @@ export default function KolektifPage() {
                 </div>
               </React.Fragment>
             ))}
+            {linkedActivities.map((a) => {
+              const fine = linkedActivityFineTotals[a.id] ?? 0;
+              if (fine === 0) return null;
+              return (
+                <React.Fragment key={a.id}>
+                  <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
+                  <div className="shrink-0">
+                    <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                      {linkedActivityTabLabels[a.id] ?? a.name}
+                    </div>
+                    <div className="text-sm font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                      {formatIDR(fine)}
+                    </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
             {linkedBooks.length > 0 && (
               <>
                 <div className="h-6 w-px shrink-0 bg-slate-200 dark:bg-slate-700" />
@@ -901,6 +1066,35 @@ export default function KolektifPage() {
                     tabIndex={0}
                     onClick={(e) => { e.stopPropagation(); setRenameLinkedRoutineTabInput(linkedRoutineTabLabels[b.id] ?? b.name); setOpenLinkedRoutineModal(true); }}
                     onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setRenameLinkedRoutineTabInput(linkedRoutineTabLabels[b.id] ?? b.name), setOpenLinkedRoutineModal(true))}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
+                    title="Info"
+                  ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
+                )}
+              </button>
+            );
+          })}
+
+          {/* Tab linked activities (absensi) */}
+          {linkedActivities.map((a) => {
+            const isActive = activeTab === "absensi" && selectedLinkedActivityId === a.id;
+            return (
+              <button
+                key={a.id}
+                type="button"
+                onClick={() => { setSelectedLinkedActivityId(a.id); setActiveTab("absensi"); }}
+                className={`relative flex items-center gap-1.5 pl-3 pr-2.5 text-sm font-medium transition-all rounded-t-lg shrink-0 select-none ${
+                  isActive
+                    ? "bg-white dark:bg-slate-800 text-slate-900 dark:text-white py-2 border border-b-white dark:border-b-slate-800 border-slate-200 dark:border-slate-700 z-10"
+                    : "py-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-white/50 dark:hover:bg-slate-800/50"
+                }`}
+              >
+                <span className="truncate max-w-[100px]">{linkedActivityTabLabels[a.id] ?? a.name}</span>
+                {userCanEdit && isActive && (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); setRenameLinkedActivityTabInput(linkedActivityTabLabels[a.id] ?? a.name); setOpenLinkedActivityModal(true); }}
+                    onKeyDown={(e) => e.key === "Enter" && (e.stopPropagation(), setRenameLinkedActivityTabInput(linkedActivityTabLabels[a.id] ?? a.name), setOpenLinkedActivityModal(true))}
                     className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer shrink-0"
                     title="Info"
                   ><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg></span>
@@ -1096,149 +1290,274 @@ export default function KolektifPage() {
           </div>
         )}
 
+        {/* Tab: Absensi (linked) */}
+        {activeTab === "absensi" && (
+          <div className="flex flex-col gap-3 flex-1 min-h-0 p-4 overflow-y-auto">
+            {linkedActivities.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <div className="text-slate-400 dark:text-slate-500 text-sm">
+                  Belum ada absensi.
+                  {userCanEdit ? ' Klik "+" untuk menambahkan.' : ""}
+                </div>
+              </div>
+            ) : (() => {
+              const activity = linkedActivities.find((a) => a.id === selectedLinkedActivityId);
+              if (!activity) return null;
+              const records = linkedActivityRecords[activity.id] ?? [];
+              const sessions = linkedActivitySessions[activity.id] ?? [];
+              const fineTotal = linkedActivityFineTotals[activity.id] ?? 0;
+
+              // Deduplicate member names from records
+              const memberNames = [...new Set(records.map((r) => r.memberName))].sort((a, b) => a.localeCompare(b, "id"));
+
+              return (
+                <div className="grid gap-3">
+                  {/* Summary cards */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Hadir</div>
+                      <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {records.filter((r) => r.status === "hadir").length}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Tidak Hadir</div>
+                      <div className="text-lg font-bold text-rose-600 dark:text-rose-400">
+                        {records.filter((r) => r.status === "tidak-hadir").length}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2.5">
+                      <div className="text-xs text-slate-500 dark:text-slate-400">Total Denda</div>
+                      <div className="text-sm font-bold text-orange-600 dark:text-orange-400 tabular-nums">
+                        {fineTotal > 0 ? formatIDR(fineTotal) : "—"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tabel absensi — per sesi untuk rutinan, flat untuk sekali */}
+                  {activity.type === "rutin" && sessions.length > 0 ? (
+                    <div className="overflow-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
+                      <table className="border-separate border-spacing-0 text-sm" style={{ minWidth: `${140 + sessions.length * 70}px`, width: "100%" }}>
+                        <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                          <tr>
+                            <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-left whitespace-nowrap">Nama</th>
+                            {sessions.map((s) => (
+                              <th key={s.id} className="border-b border-r border-slate-200 dark:border-slate-700 px-2 py-2 text-center whitespace-nowrap">
+                                <div className="text-[11px] leading-tight">{s.label}</div>
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberNames.map((name) => (
+                            <tr key={name} className="hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                              <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 font-medium text-slate-900 dark:text-white text-xs">{name}</td>
+                              {sessions.map((s) => {
+                                const rec = records.find((r) => r.sessionId === s.id && r.memberName === name);
+                                const st = rec?.status ?? null;
+                                return (
+                                  <td key={s.id} className="border-b border-r border-slate-200 dark:border-slate-700 px-2 py-2 text-center">
+                                    {st === "denda" ? (
+                                      <span className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums">
+                                        {rec?.fineAmount ? `Rp ${rec.fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                                      </span>
+                                    ) : (
+                                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[11px] font-bold ${
+                                        st === "hadir" ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                        : st === "izin" ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                        : st === "tidak-hadir" ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                        : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
+                                      }`}>
+                                        {st === "hadir" ? "✓" : st === "izin" ? "~" : st === "tidak-hadir" ? "✗" : ""}
+                                      </span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 overflow-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-2 text-left border-b border-slate-200 dark:border-slate-700">Nama</th>
+                            <th className="px-4 py-2 text-center border-b border-slate-200 dark:border-slate-700">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {memberNames.map((name) => {
+                            const rec = records.find((r) => r.memberName === name);
+                            const st = rec?.status ?? null;
+                            return (
+                              <tr key={name} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40">
+                                <td className="px-4 py-2 font-medium text-slate-900 dark:text-white">{name}</td>
+                                <td className="px-4 py-2 text-center">
+                                  {st === "denda" ? (
+                                    <span className="text-sm font-bold text-rose-600 dark:text-rose-400 tabular-nums">
+                                      {rec?.fineAmount ? `Rp ${rec.fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                                    </span>
+                                  ) : (
+                                    <span className={`inline-flex h-6 w-6 items-center justify-center rounded border text-xs font-bold ${
+                                      st === "hadir" ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                      : st === "izin" ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                      : st === "tidak-hadir" ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
+                                    }`}>
+                                      {st === "hadir" ? "✓" : st === "izin" ? "~" : st === "tidak-hadir" ? "✗" : ""}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
         </div>
       </div>
 
       {/* Modal atur kolom template — wajib sebelum buat sub-buku pertama */}
       <Modal
         open={openTemplateColumnModal}
-        title="Atur Kolom Sub-Buku"
+        title="Ubah Nama & Tipe Kolom"
         onClose={() => setOpenTemplateColumnModal(false)}
       >
         <div className="grid gap-4">
-          <p className="text-sm text-slate-500 dark:text-slate-400">
-            Atur nama dan tipe kolom. Semua sub-buku yang dibuat akan pakai settingan ini.
-          </p>
-
-          {/* Kolom 1 */}
-          <div className="grid gap-1.5">
-            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 1 (Header)</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
-                value={tmplHeaderLabel}
-                onChange={(e) => setTmplHeaderLabel(e.target.value)}
-                placeholder="Nama"
-              />
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 1</div>
+            <Input
+              placeholder="Contoh: Nama Anggota"
+              value={tmplHeaderLabel}
+              onChange={(e) => setTmplHeaderLabel(e.target.value)}
+            />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">Tipe:</label>
               <select
                 value={tmplHeaderType}
                 onChange={(e) => setTmplHeaderType(e.target.value as KolektifColumnType)}
-                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
               >
                 <option value="text">Text</option>
-                <option value="number">Angka</option>
+                <option value="number">Angka/Uang</option>
                 <option value="date">Tanggal</option>
               </select>
             </div>
           </div>
-
-          {/* Kolom 2 */}
-          <div className="grid gap-1.5">
-            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 2 (Nominal)</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
-                value={tmplNominalLabel}
-                onChange={(e) => setTmplNominalLabel(e.target.value)}
-                placeholder="Nominal"
-              />
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 2</div>
+            <Input
+              placeholder="Contoh: Nominal"
+              value={tmplNominalLabel}
+              onChange={(e) => setTmplNominalLabel(e.target.value)}
+            />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">Tipe:</label>
               <select
                 value={tmplNominalType}
                 onChange={(e) => setTmplNominalType(e.target.value as KolektifColumnType)}
-                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
               >
                 <option value="text">Text</option>
-                <option value="number">Angka</option>
+                <option value="number">Angka/Uang</option>
               </select>
             </div>
           </div>
-
-          {/* Kolom 3 */}
-          <div className="grid gap-1.5">
-            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 3 (Keterangan)</div>
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
-                value={tmplNoteLabel}
-                onChange={(e) => setTmplNoteLabel(e.target.value)}
-                placeholder="Keterangan"
-              />
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Kolom 3</div>
+            <Input
+              placeholder="Contoh: Keterangan"
+              value={tmplNoteLabel}
+              onChange={(e) => setTmplNoteLabel(e.target.value)}
+            />
+            <div className="mt-2">
+              <label className="text-xs text-slate-500 dark:text-slate-400 mr-2">Tipe:</label>
               <select
                 value={tmplNoteType}
                 onChange={(e) => setTmplNoteType(e.target.value as KolektifColumnType)}
-                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
+                className="rounded border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm px-2 py-1"
               >
                 <option value="text">Text</option>
-                <option value="number">Angka</option>
+                <option value="number">Angka/Uang</option>
                 <option value="date">Tanggal</option>
               </select>
             </div>
           </div>
 
-          {/* Extra columns */}
-          <div className="border-t border-slate-200 dark:border-slate-700 pt-3 grid gap-2">
-            <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom Tambahan</div>
-            {tmplExtraCols.map((col) => (
-              <div key={col.id} className="flex items-center gap-2">
-                <input
-                  className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
-                  value={col.label}
-                  onChange={(e) => setTmplExtraCols((prev) => prev.map((c) => c.id === col.id ? { ...c, label: e.target.value } : c))}
-                />
-                <select
-                  value={col.columnType}
-                  onChange={(e) => setTmplExtraCols((prev) => prev.map((c) => c.id === col.id ? { ...c, columnType: e.target.value as KolektifColumnType } : c))}
-                  className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
-                >
-                  <option value="text">Text</option>
-                  <option value="number">Angka</option>
-                  <option value="date">Tanggal</option>
-                </select>
-                <button
-                  type="button"
-                  onClick={() => setTmplExtraCols((prev) => prev.filter((c) => c.id !== col.id))}
-                  className="rounded p-1.5 text-rose-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
-                    <path d="M18 6 6 18M6 6l12 12"/>
-                  </svg>
-                </button>
-              </div>
-            ))}
-            <div className="flex gap-2">
-              <input
-                className="flex-1 rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20"
-                placeholder="Nama kolom baru..."
-                value={tmplNewColLabel}
-                onChange={(e) => setTmplNewColLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && tmplNewColLabel.trim()) {
-                    setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
-                    setTmplNewColLabel("");
-                  }
-                }}
-              />
-              <select
-                value={tmplNewColType}
-                onChange={(e) => setTmplNewColType(e.target.value as KolektifColumnType)}
-                className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-2 py-2 text-sm"
-              >
-                <option value="text">Text</option>
-                <option value="number">Angka</option>
-                <option value="date">Tanggal</option>
-              </select>
+          {/* Kolom Tambahan */}
+          <div className="border-t border-slate-200 dark:border-slate-700 pt-3">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Kolom Tambahan</span>
               <button
                 type="button"
                 onClick={() => {
-                  if (!tmplNewColLabel.trim()) return;
-                  setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
+                  setTmplEditingColId(null);
                   setTmplNewColLabel("");
+                  setTmplNewColType("text");
+                  setOpenTmplAddColModal(true);
                 }}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
               >
-                + Tambah
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                  <path d="M5 12h14"/><path d="M12 5v14"/>
+                </svg>
+                Tambah
               </button>
             </div>
+            {tmplExtraCols.length === 0 ? (
+              <div className="text-xs text-slate-400 italic">Belum ada kolom tambahan</div>
+            ) : (
+              <div className="grid gap-2">
+                {tmplExtraCols.map((col) => (
+                  <div key={col.id} className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300 truncate">{col.label}</span>
+                      <span className="text-[10px] uppercase text-slate-400 dark:text-slate-500 shrink-0">
+                        {col.columnType === "number" ? "Angka" : col.columnType === "date" ? "Tanggal" : "Text"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTmplEditingColId(col.id);
+                          setTmplNewColLabel(col.label);
+                          setTmplNewColType(col.columnType);
+                          setOpenTmplAddColModal(true);
+                        }}
+                        className="rounded p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        title="Edit"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setTmplExtraCols((prev) => prev.filter((c) => c.id !== col.id))}
+                        className="rounded p-1 text-rose-400 hover:text-rose-600"
+                        title="Hapus"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                          <path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-2 border-t border-slate-200 dark:border-slate-700 pt-3">
@@ -1246,6 +1565,170 @@ export default function KolektifPage() {
             <Button onClick={saveTemplateAndContinue} disabled={saving}>
               {saving ? "Menyimpan..." : "Lanjut →"}
             </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Sub-modal tambah/edit kolom tambahan untuk template */}
+      <Modal
+        open={openTmplAddColModal}
+        title={tmplEditingColId ? "Edit Kolom" : "Tambah Kolom"}
+        onClose={() => setOpenTmplAddColModal(false)}
+      >
+        <div className="grid gap-4">
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Nama Kolom</div>
+            <Input
+              placeholder="Contoh: Alamat"
+              value={tmplNewColLabel}
+              onChange={(e) => setTmplNewColLabel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && tmplNewColLabel.trim()) {
+                  if (tmplEditingColId) {
+                    setTmplExtraCols((prev) => prev.map((c) => c.id === tmplEditingColId ? { ...c, label: tmplNewColLabel.trim(), columnType: tmplNewColType } : c));
+                  } else {
+                    setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
+                  }
+                  setOpenTmplAddColModal(false);
+                }
+              }}
+            />
+          </div>
+          <div>
+            <div className="mb-1 text-xs font-medium text-slate-600 dark:text-slate-400">Tipe</div>
+            <select
+              value={tmplNewColType}
+              onChange={(e) => setTmplNewColType(e.target.value as KolektifColumnType)}
+              className="w-full rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-slate-900/20 dark:focus:ring-slate-700/50"
+            >
+              <option value="text">Text</option>
+              <option value="number">Angka/Uang</option>
+              <option value="date">Tanggal</option>
+            </select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenTmplAddColModal(false)}>Batal</Button>
+            <Button
+              onClick={() => {
+                if (!tmplNewColLabel.trim()) return;
+                if (tmplEditingColId) {
+                  setTmplExtraCols((prev) => prev.map((c) => c.id === tmplEditingColId ? { ...c, label: tmplNewColLabel.trim(), columnType: tmplNewColType } : c));
+                } else {
+                  setTmplExtraCols((prev) => [...prev, { id: `tmp-${Date.now()}`, label: tmplNewColLabel.trim(), columnType: tmplNewColType }]);
+                }
+                setOpenTmplAddColModal(false);
+              }}
+              disabled={!tmplNewColLabel.trim()}
+            >
+              Simpan
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal pilih activity untuk di-link */}
+      <Modal open={openAddActivityModal} title="Tambah Absensi" onClose={() => setOpenAddActivityModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-500 dark:text-slate-400">Pilih kegiatan absensi yang ingin dihubungkan:</p>
+          {allActivities.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-slate-300 dark:border-slate-600 px-4 py-6 text-center text-sm text-slate-400">
+              Tidak ada kegiatan absensi yang tersedia.
+            </div>
+          ) : (
+            <div className="grid gap-2 max-h-64 overflow-auto">
+              {allActivities.map((a) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  onClick={() => handleLinkActivity(a.id)}
+                  disabled={saving}
+                  className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition disabled:opacity-50"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-slate-900 dark:text-white truncate">{a.name}</div>
+                    <div className="text-xs text-slate-400">{a.type === "rutin" ? "Rutinan" : "Sekali"}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setOpenAddActivityModal(false)}>Batal</Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal unlink activity */}
+      <Modal open={openUnlinkActivityModal} title="Lepas Absensi" onClose={() => setOpenUnlinkActivityModal(false)}>
+        <div className="grid gap-4">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Lepas link kegiatan <span className="font-semibold text-slate-900 dark:text-white">"{linkedActivities.find((a) => a.id === selectedLinkedActivityId)?.name}"</span> dari buku kolektif ini?
+          </p>
+          <p className="text-xs text-slate-400">Data absensi tidak akan terhapus, hanya lepas link-nya.</p>
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={() => setOpenUnlinkActivityModal(false)}>Batal</Button>
+            <button
+              type="button"
+              onClick={handleUnlinkActivity}
+              disabled={saving}
+              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700 disabled:opacity-60"
+            >
+              {saving ? "Melepas..." : "Lepas"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal info/rename label tab absensi */}
+      <Modal
+        open={openLinkedActivityModal}
+        title={linkedActivities.find((a) => a.id === selectedLinkedActivityId)?.name ?? "Absensi"}
+        onClose={() => setOpenLinkedActivityModal(false)}
+      >
+        <div className="grid gap-4">
+          {userCanEdit && (
+            <div className="grid gap-1.5">
+              <div className="text-xs font-medium text-slate-600 dark:text-slate-400">Label Tab</div>
+              <div className="flex gap-2">
+                <Input
+                  value={renameLinkedActivityTabInput}
+                  onChange={(e) => setRenameLinkedActivityTabInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleRenameLinkedActivityTab()}
+                  placeholder={linkedActivities.find((a) => a.id === selectedLinkedActivityId)?.name ?? ""}
+                  className="flex-1"
+                />
+                <Button
+                  onClick={handleRenameLinkedActivityTab}
+                  disabled={!renameLinkedActivityTabInput.trim() || saving}
+                >
+                  {saving ? "..." : "Simpan"}
+                </Button>
+              </div>
+              <div className="text-xs text-slate-400">
+                Nama asli: <span className="font-medium text-slate-600 dark:text-slate-300">{linkedActivities.find((a) => a.id === selectedLinkedActivityId)?.name}</span>
+              </div>
+            </div>
+          )}
+          {userCanEdit && (
+            <div className="flex justify-between items-center pt-1 border-t dark:border-slate-700">
+              <span className="text-xs text-slate-400">Terhubung ke buku kolektif ini</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenLinkedActivityModal(false);
+                  setTimeout(() => setOpenUnlinkActivityModal(true), 150);
+                }}
+                className="text-sm text-rose-500 hover:text-rose-700 font-medium"
+              >
+                Lepas dari kolektif
+              </button>
+            </div>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setOpenLinkedActivityModal(false)}>Tutup</Button>
           </div>
         </div>
       </Modal>
@@ -1360,6 +1843,19 @@ export default function KolektifPage() {
             <div>
               <div className="text-sm font-medium text-slate-900 dark:text-white">Buku Rutinan</div>
               <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan link ke buku rutinan</div>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => { setOpenAddTypeModal(false); openAddActivityModalFn(); }}
+            className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+          >
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400 shrink-0">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            </div>
+            <div>
+              <div className="text-sm font-medium text-slate-900 dark:text-white">Absensi</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Tampilkan link ke kegiatan absensi</div>
             </div>
           </button>
         </div>

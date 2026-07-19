@@ -383,16 +383,36 @@ export default function RoutineBookPage({ bookId: bookIdProp }: { bookId?: strin
     function updateTableHeight() {
       if (!tableWrapperRef.current) return;
       const rect = tableWrapperRef.current.getBoundingClientRect();
-      const bottomNav = window.innerWidth < 768 ? 56 : 0;
-      const available = window.innerHeight - rect.top - bottomNav - 4;
+      // Landscape mobile: tinggi viewport < 500px (misal HP landscape)
+      // Portrait mobile: lebar < 768px
+      // Keduanya punya bottom nav ~56-64px
+      const hasBottomNav = window.innerWidth < 768 || window.innerHeight < 500;
+      const bottomNav = hasBottomNav ? 64 : 0;
+      const safeAreaBottom = 8;
+      const available = window.innerHeight - rect.top - bottomNav - safeAreaBottom;
       setTableHeight(`${Math.max(150, available)}px`);
     }
 
     const raf = requestAnimationFrame(updateTableHeight);
     window.addEventListener("resize", updateTableHeight);
+    window.addEventListener("orientationchange", () => {
+      // orientationchange perlu sedikit delay karena viewport belum terupdate
+      setTimeout(updateTableHeight, 150);
+    });
+
+    // ResizeObserver pada wrapper sendiri — mendeteksi perubahan posisi akibat layout reflow
+    let observer: ResizeObserver | null = null;
+    if (tableWrapperRef.current) {
+      observer = new ResizeObserver(() => requestAnimationFrame(updateTableHeight));
+      observer.observe(tableWrapperRef.current);
+      // Observe document body untuk mendeteksi perubahan elemen di atas tabel
+      observer.observe(document.documentElement);
+    }
+
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", updateTableHeight);
+      observer?.disconnect();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [members.length, categories.length, sessions.length, frequency, selectedSessionId, selectedCategoryId]);
@@ -1705,8 +1725,8 @@ export default function RoutineBookPage({ bookId: bookIdProp }: { bookId?: strin
             style={{ height: tableHeight }}
           >
             <table
-              className="w-full border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm"
-              style={{ tableLayout: "fixed" }}
+              className="border-separate border-spacing-0 bg-white dark:bg-slate-800 text-left text-sm shadow-sm"
+              style={{ tableLayout: "fixed", minWidth: "480px", width: "100%" }}
             >
               <thead className="bg-slate-50 dark:bg-slate-900 text-xs uppercase text-slate-500 dark:text-slate-400">
                 <tr>

@@ -164,7 +164,8 @@ export type AttendanceRecord = {
   activityId: string;
   sessionId?: string; // opsional: untuk kegiatan rutin, terikat ke sesi
   memberName: string;
-  status: "hadir" | "izin" | "tidak-hadir";
+  status: "hadir" | "izin" | "tidak-hadir" | "denda";
+  fineAmount?: number; // hanya diisi saat status === "denda"
   note?: string;
   timestamp: string;
 };

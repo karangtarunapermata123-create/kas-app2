@@ -1926,6 +1926,142 @@ export async function deleteTransaction(
 
 // ─── Activities ───────────────────────────────────────────────────────────────
 
+// ─── Kolektif Linked Activities ───────────────────────────────────────────────
+
+export type LinkedActivity = Activity & { tabLabel: string | null; linkId: string };
+
+export async function getKolektifLinkedActivities(
+  kolektifBookId: string,
+): Promise<LinkedActivity[]> {
+  // Try selecting with tab_label first (newer schema), fall back to without
+  let links: any[] | null = null;
+  try {
+    const { data, error } = await supabase
+      .from("kolektif_linked_activities")
+      .select("id, activity_id, tab_label")
+      .eq("kolektif_book_id", kolektifBookId);
+    if (error) throw error;
+    links = data;
+  } catch (e) {
+    // If tab_label column doesn't exist, fall back to basic select
+    const errMsg = (e as any)?.message ?? "";
+    if (errMsg.includes("tab_label") && (errMsg.includes("column") || errMsg.includes("does not exist"))) {
+      const { data, error } = await supabase
+        .from("kolektif_linked_activities")
+        .select("id, activity_id")
+        .eq("kolektif_book_id", kolektifBookId);
+      if (error) throw error;
+      links = data;
+    } else {
+      throw e;
+    }
+  }
+  if (!links || links.length === 0) return [];
+
+  const linkMap = new Map<string, { linkId: string; tabLabel: string | null }>();
+  for (const l of links) {
+    const row = l as Record<string, unknown>;
+    linkMap.set(String(row.activity_id), {
+      linkId: String(row.id),
+      tabLabel: row.tab_label ? String(row.tab_label) : null,
+    });
+  }
+
+  const activityIds = [...linkMap.keys()];
+  const { data, error } = await supabase
+    .from("activities")
+    .select("*")
+    .in("id", activityIds)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((a) => {
+    const link = linkMap.get(a.id) ?? { linkId: "", tabLabel: null };
+    return {
+      id: a.id,
+      name: a.name,
+      type: a.type as Activity["type"],
+      frequency: a.frequency as Activity["frequency"],
+      date: a.date,
+      description: a.description ?? undefined,
+      qrToken: a.qr_token ?? undefined,
+      createdAt: a.created_at,
+      tabLabel: link.tabLabel,
+      linkId: link.linkId,
+    };
+  });
+}
+
+export async function updateLinkedActivityTabLabel(
+  linkId: string,
+  tabLabel: string | null,
+): Promise<void> {
+  try {
+    const { error } = await supabase
+      .from("kolektif_linked_activities")
+      .update({ tab_label: tabLabel?.trim() || null })
+      .eq("id", linkId);
+    if (error) throw error;
+  } catch (e) {
+    // If tab_label column doesn't exist, silently skip
+    const errMsg = (e as any)?.message ?? "";
+    if (errMsg.includes("tab_label") && (errMsg.includes("column") || errMsg.includes("does not exist"))) {
+      console.warn("tab_label column does not exist yet, skipping update");
+      return;
+    }
+    throw e;
+  }
+}
+
+export async function linkActivityToKolektif(
+  activityId: string,
+  kolektifBookId: string,
+): Promise<void> {
+  const { error } = await supabase.from("kolektif_linked_activities").insert({
+    id: uid("kla"),
+    kolektif_book_id: kolektifBookId,
+    activity_id: activityId,
+  });
+  // If unique constraint violation (already linked), treat as success
+  if (error) {
+    const errMsg = (error as any)?.message ?? "";
+    const errCode = (error as any)?.code ?? "";
+    // PostgreSQL error code 23505 = unique_violation
+    if (errCode === "23505" || errMsg.includes("unique") || errMsg.includes("duplicate")) {
+      console.warn("Activity already linked to this kolektif book, skipping insert:", activityId, kolektifBookId);
+      return;
+    }
+    throw error;
+  }
+}
+
+export async function unlinkActivityFromKolektif(
+  activityId: string,
+  kolektifBookId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("kolektif_linked_activities")
+    .delete()
+    .eq("kolektif_book_id", kolektifBookId)
+    .eq("activity_id", activityId);
+  if (error) throw error;
+}
+
+/**
+ * Hitung total denda dari semua attendance records untuk activity tertentu.
+ */
+export async function getActivityFineTotal(activityId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("attendance_records")
+    .select("fine_amount")
+    .eq("activity_id", activityId)
+    .eq("status", "denda");
+  if (error) throw error;
+  return (data ?? []).reduce((sum, r) => {
+    const row = r as Record<string, unknown>;
+    return sum + (row.fine_amount != null ? Number(row.fine_amount) : 0);
+  }, 0);
+}
+
 export async function getActivities(): Promise<Activity[]> {
   const { data, error } = await supabase
     .from("activities")
@@ -2131,18 +2267,22 @@ export async function updateActivitySession(
 export async function getAttendanceRecords(): Promise<AttendanceRecord[]> {
   const { data, error } = await supabase
     .from("attendance_records")
-    .select("*")
+    .select("id, activity_id, session_id, member_name, status, fine_amount, note, timestamp")
     .order("timestamp", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    activityId: r.activity_id,
-    sessionId: r.session_id ?? undefined,
-    memberName: r.member_name,
-    status: r.status as AttendanceRecord["status"],
-    note: r.note ?? undefined,
-    timestamp: r.timestamp,
-  }));
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      activityId: String(row.activity_id),
+      sessionId: row.session_id ? String(row.session_id) : undefined,
+      memberName: String(row.member_name),
+      status: String(row.status) as AttendanceRecord["status"],
+      fineAmount: row.fine_amount != null ? Number(row.fine_amount) : undefined,
+      note: row.note ? String(row.note) : undefined,
+      timestamp: String(row.timestamp),
+    };
+  });
 }
 
 export async function saveAttendanceRecords(
@@ -2155,6 +2295,7 @@ export async function saveAttendanceRecords(
       session_id: r.sessionId ?? null,
       member_name: r.memberName,
       status: r.status,
+      fine_amount: r.fineAmount ?? null,
       note: r.note ?? null,
       timestamp: r.timestamp,
     });
@@ -2165,7 +2306,8 @@ export async function addAttendanceRecord(input: {
   activityId: string;
   sessionId?: string;
   memberName: string;
-  status: "hadir" | "izin" | "tidak-hadir";
+  status: AttendanceRecord["status"];
+  fineAmount?: number;
   note?: string;
 }): Promise<AttendanceRecord> {
   const record: AttendanceRecord = {
@@ -2174,6 +2316,7 @@ export async function addAttendanceRecord(input: {
     sessionId: input.sessionId,
     memberName: input.memberName.trim(),
     status: input.status,
+    fineAmount: input.fineAmount,
     note: input.note?.trim(),
     timestamp: new Date().toISOString(),
   };
@@ -2183,6 +2326,7 @@ export async function addAttendanceRecord(input: {
     session_id: record.sessionId ?? null,
     member_name: record.memberName,
     status: record.status,
+    fine_amount: record.fineAmount ?? null,
     note: record.note ?? null,
     timestamp: record.timestamp,
   });
@@ -2199,6 +2343,12 @@ export async function updateAttendanceRecord(
   if (patch.status !== undefined) update.status = patch.status;
   if (patch.note !== undefined) update.note = patch.note;
   if (patch.memberName !== undefined) update.member_name = patch.memberName;
+  // Selalu set fine_amount saat status di-update — null jika bukan denda
+  if (patch.status !== undefined) {
+    update.fine_amount = patch.status === "denda" ? (patch.fineAmount ?? null) : null;
+  } else if (patch.fineAmount !== undefined) {
+    update.fine_amount = patch.fineAmount ?? null;
+  }
   const { error } = await supabase
     .from("attendance_records")
     .update(update)
@@ -2221,20 +2371,24 @@ export async function getAttendanceByActivity(
 ): Promise<AttendanceRecord[]> {
   const { data, error } = await supabase
     .from("attendance_records")
-    .select("*")
+    .select("id, activity_id, session_id, member_name, status, fine_amount, note, timestamp")
     .eq("activity_id", activityId)
     .is("session_id", null)
     .order("timestamp", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    activityId: r.activity_id,
-    sessionId: undefined,
-    memberName: r.member_name,
-    status: r.status as AttendanceRecord["status"],
-    note: r.note ?? undefined,
-    timestamp: r.timestamp,
-  }));
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      activityId: String(row.activity_id),
+      sessionId: undefined,
+      memberName: String(row.member_name),
+      status: String(row.status) as AttendanceRecord["status"],
+      fineAmount: row.fine_amount != null ? Number(row.fine_amount) : undefined,
+      note: row.note ? String(row.note) : undefined,
+      timestamp: String(row.timestamp),
+    };
+  });
 }
 
 export async function getAttendanceBySession(
@@ -2242,19 +2396,23 @@ export async function getAttendanceBySession(
 ): Promise<AttendanceRecord[]> {
   const { data, error } = await supabase
     .from("attendance_records")
-    .select("*")
+    .select("id, activity_id, session_id, member_name, status, fine_amount, note, timestamp")
     .eq("session_id", sessionId)
     .order("timestamp", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    activityId: r.activity_id,
-    sessionId: r.session_id ?? undefined,
-    memberName: r.member_name,
-    status: r.status as AttendanceRecord["status"],
-    note: r.note ?? undefined,
-    timestamp: r.timestamp,
-  }));
+  return (data ?? []).map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      id: String(row.id),
+      activityId: String(row.activity_id),
+      sessionId: row.session_id ? String(row.session_id) : undefined,
+      memberName: String(row.member_name),
+      status: String(row.status) as AttendanceRecord["status"],
+      fineAmount: row.fine_amount != null ? Number(row.fine_amount) : undefined,
+      note: row.note ? String(row.note) : undefined,
+      timestamp: String(row.timestamp),
+    };
+  });
 }
 
 // ─── QR Code Attendance ───────────────────────────────────────────────────────

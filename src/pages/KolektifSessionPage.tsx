@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams } from "react-router-dom";
 import Button from "../components/Button";
 import Input from "../components/Input";
@@ -84,6 +84,54 @@ export default function KolektifSessionPage() {
 
   const [saving, setSaving] = useState(false);
 
+  // Dynamic table height calculation
+  const aboveTableRef = useRef<HTMLDivElement>(null);
+  const [tableMaxHeight, setTableMaxHeight] = useState<string>("55vh");
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearchMode, setIsSearchMode] = useState(false);
+  const [allPage, setAllPage] = useState(-1);
+  const [dynamicPageSize, setDynamicPageSize] = useState(15);
+
+  const recalcTableHeight = useCallback(() => {
+    if (!aboveTableRef.current) return;
+    const aboveHeight = aboveTableRef.current.getBoundingClientRect().height;
+    const aboveTop = aboveTableRef.current.getBoundingClientRect().top;
+    const isMobile = window.innerWidth < 768;
+    const bottomPadding = isMobile ? 60 : 8;
+    const extraGap = 8;
+    const available = window.innerHeight - (aboveTop + aboveHeight) - bottomPadding - extraGap;
+    const min = 200;
+    const finalHeight = Math.max(min, available);
+    setTableMaxHeight(`${finalHeight}px`);
+    const theadHeight = 36;
+    const rowHeight = 48;
+    const paginationHeight = 44;
+    const usable = finalHeight - theadHeight - paginationHeight;
+    const rows = Math.max(5, Math.floor(usable / rowHeight));
+    setDynamicPageSize(rows);
+  }, []);
+
+  useEffect(() => {
+    recalcTableHeight();
+    const observer = new ResizeObserver(recalcTableHeight);
+    if (aboveTableRef.current) observer.observe(aboveTableRef.current);
+    window.addEventListener("resize", recalcTableHeight);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", recalcTableHeight);
+    };
+  }, [recalcTableHeight]);
+
+  useEffect(() => {
+    const t = setTimeout(recalcTableHeight, 50);
+    return () => clearTimeout(t);
+  }, [isSearchMode, recalcTableHeight]);
+
+  useEffect(() => {
+    setAllPage(-1);
+  }, [searchQuery, isSearchMode]);
+
   const refresh = async () => {
     const cfg = await getKolektifConfig(safeSessionId);
     setConfig(cfg);
@@ -93,6 +141,13 @@ export default function KolektifSessionPage() {
     setLoading(true);
     refresh().finally(() => setLoading(false));
   }, [safeSessionId]);
+
+  useEffect(() => {
+    if (!loading) {
+      const t = setTimeout(recalcTableHeight, 50);
+      return () => clearTimeout(t);
+    }
+  }, [loading, recalcTableHeight]);
 
   // ── Row modal ──
   function openAddRow() {
@@ -325,6 +380,29 @@ export default function KolektifSessionPage() {
     return sum;
   }, 0);
 
+  const filteredRows = useMemo(() => {
+    if (!isSearchMode || !searchQuery.trim()) return config.rows;
+    const query = searchQuery.toLowerCase().trim();
+    return config.rows.filter((r) => {
+      const headerText = config.headerLabelType === "number"
+        ? String(r.headerValue ?? Number(r.label) ?? "")
+        : String(r.label ?? "");
+      const noteText = String(r.note ?? "");
+      const amountText = String(r.amount ?? "");
+      return headerText.toLowerCase().includes(query)
+        || noteText.toLowerCase().includes(query)
+        || amountText.includes(query);
+    });
+  }, [config.rows, searchQuery, isSearchMode, config.headerLabelType]);
+
+  const totalFilteredRows = filteredRows.length;
+  const totalPages = Math.max(1, Math.ceil(totalFilteredRows / dynamicPageSize));
+  const currentPage = allPage < 0 || allPage >= totalPages ? totalPages - 1 : allPage;
+  const displayedRows = useMemo(() => {
+    const start = currentPage * dynamicPageSize;
+    return filteredRows.slice(start, start + dynamicPageSize);
+  }, [filteredRows, currentPage, dynamicPageSize]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
@@ -355,198 +433,230 @@ export default function KolektifSessionPage() {
 
   return (
     <div className="grid gap-4">
-      {/* Toolbar: stats + aksi kolom */}
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Statistik */}
-        {config.rows.length > 0 && (
-          <div className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 flex items-center gap-3 text-sm">
-            <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Total</div>
-              <div className="font-bold text-emerald-600 dark:text-emerald-400">{formatIDR(totalAmount)}</div>
-            </div>
-            <div className="h-7 w-px bg-slate-200 dark:bg-slate-700" />
-            <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">Baris</div>
-              <div className="font-bold text-slate-900 dark:text-white">{config.rows.length}</div>
-            </div>
-          </div>
-        )}
+      {/* Semua elemen di atas tabel — diukur untuk kalkulasi tinggi tabel */}
+      <div ref={aboveTableRef} className="flex flex-col gap-2">
 
-        {/* Tombol atur kolom — hanya tampil untuk editor */}
-        {userCanEdit && (
-          <div className="flex items-center gap-2 ml-auto">
-            <button
-              type="button"
+        {/* Toolbar: saldo + search field + atur kolom */}
+        <div className="flex items-center gap-2">
+          {/* Saldo — tinggi sama dengan search field */}
+          {config.rows.length > 0 && (
+            <div className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-2.5 py-1.5 shrink-0 h-[34px]">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">Saldo</span>
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{formatIDR(totalAmount)}</span>
+            </div>
+          )}
+
+          {/* Search field inline */}
+          <div className="relative flex-1 min-w-0">
+            <input
+              type="text"
+              placeholder="Cari data..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setIsSearchMode(e.target.value.trim().length > 0); }}
+              className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-3 text-sm text-slate-900 placeholder-slate-400 focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 dark:border-slate-600 dark:bg-slate-800 dark:text-white dark:placeholder-slate-500 dark:focus:border-slate-400 dark:focus:ring-slate-400"
+            />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden="true">
+              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+            </svg>
+            {searchQuery && (
+              <button type="button" onClick={() => { setSearchQuery(""); setIsSearchMode(false); }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                  <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+                </svg>
+              </button>
+            )}
+          </div>
+
+          {/* Tombol atur kolom */}
+          {userCanEdit && (
+            <button type="button"
               onClick={() => {
-                setHeaderInput(config.headerLabel);
-                setNominalInput(config.nominalLabel);
-                setNoteHeaderInput(config.noteLabel);
-                setHeaderType(config.headerLabelType);
-                setNominalType(config.nominalLabelType);
-                setNoteType(config.noteLabelType);
+                setHeaderInput(config.headerLabel); setNominalInput(config.nominalLabel);
+                setNoteHeaderInput(config.noteLabel); setHeaderType(config.headerLabelType);
+                setNominalType(config.nominalLabelType); setNoteType(config.noteLabelType);
                 setOpenHeaderModal(true);
               }}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+              className="flex shrink-0 h-[34px] w-[34px] items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+              title="Atur Kolom"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
                 <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
               </svg>
-              Atur Kolom
+            </button>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {totalFilteredRows > dynamicPageSize && (
+          <div className="flex items-center justify-between gap-2">
+            <button type="button" disabled={currentPage === 0}
+              onClick={() => setAllPage((p) => { const cp = p < 0 || p >= totalPages ? totalPages - 1 : p; return Math.max(0, cp - 1); })}
+              className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            >
+              ← Sebelumnya
+            </button>
+            <span className="text-xs text-slate-500 dark:text-slate-400">{currentPage + 1} / {totalPages}</span>
+            <button type="button" disabled={currentPage >= totalPages - 1}
+              onClick={() => setAllPage((p) => { const cp = p < 0 || p >= totalPages ? totalPages - 1 : p; return Math.min(totalPages - 1, cp + 1); })}
+              className="rounded-lg border px-3 py-1.5 text-sm font-medium disabled:opacity-40 bg-white dark:bg-slate-800 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            >
+              Selanjutnya →
             </button>
           </div>
         )}
-      </div>
+
+      </div>{/* end aboveTableRef */}
 
       {/* Tabel */}
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
-        <table className="border-separate border-spacing-0 text-sm" style={{ minWidth: `${Math.max(480, 160 + 140 + 140 + config.extraColumns.length * 140)}px`, width: "100%" }}>
-          <colgroup>
-            {/* Kolom no + header: sticky, lebar cukup */}
-            <col style={{ minWidth: "160px", width: "22%" }} />
-            {/* Kolom nominal */}
-            <col style={{ minWidth: "140px", width: "18%" }} />
-            {/* Kolom note */}
-            <col style={{ minWidth: "140px", width: "20%" }} />
-            {/* Extra columns: fixed 140px each */}
-            {config.extraColumns.map((col) => (
-              <col key={col.id} style={{ minWidth: "140px", width: "140px" }} />
-            ))}
-
-          </colgroup>
-          <thead className="bg-slate-50 dark:bg-slate-900 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            <tr>
-              <th className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
-                {config.headerLabel}
-              </th>
-              <th className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap">
-                {config.nominalLabel}
-              </th>
-              <th className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
-                {config.noteLabel}
-              </th>
-              {config.extraColumns.map((col, i) => (
-                <th
-                  key={col.id}
-                  className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-left whitespace-nowrap ${i < config.extraColumns.length - 1 || userCanEdit ? "border-r" : ""}`}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate max-w-[100px]">{col.label}</span>
-                    {userCanEdit && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingExtraColumn(col);
-                          setExtraColInput(col.label);
-                          setExtraColType(col.columnType);
-                          setOpenExtraColumnsModal(true);
-                        }}
-                        className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition"
-                        title={`Edit kolom "${col.label}"`}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
-                        </svg>
-                      </button>
-                    )}
-                  </div>
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {config.rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={3 + config.extraColumns.length}
-                  className="px-4 py-12 text-center text-slate-400 dark:text-slate-500"
-                >
-                  Belum ada data.
-                  {userCanEdit ? ' Klik "+" untuk menambahkan baris.' : ""}
-                </td>
-              </tr>
-            ) : (
-              config.rows.map((row, idx) => (
-                <tr
-                  key={row.id}
-                  className={`group hover:bg-slate-50 dark:hover:bg-slate-700/40 ${userCanEdit ? "cursor-pointer" : ""}`}
-                  onClick={userCanEdit ? () => openEditRow(row) : undefined}
-                >
-                  {/* Kolom header — sticky */}
-                  <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/40 px-4 py-3 font-medium text-slate-900 dark:text-white transition-colors">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0 tabular-nums">{idx + 1}.</span>
-                      <span className="truncate max-w-[110px]">
-                        {config.headerLabelType === "number"
-                          ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
-                          : row.label}
-                      </span>
-                    </div>
-                  </td>
-                  {/* Nominal */}
-                  <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium tabular-nums">
-                    {config.nominalLabelType === "number" ? (
-                      <span className={row.txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}>
-                        {row.txType === "keluar" ? "−\u202f" : ""}{formatIDR(row.amount)}
-                      </span>
-                    ) : (
-                      <span className="text-slate-700 dark:text-slate-300">{String(row.amount)}</span>
-                    )}
-                  </td>
-                  {/* Note */}
-                  <td className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
-                    <span className="line-clamp-2">
-                      {config.noteLabelType === "number"
-                        ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
-                        : (row.note || "-")}
-                    </span>
-                  </td>
-                  {/* Extra columns */}
-                  {config.extraColumns.map((col, i) => {
-                    const extraVal = row.extraValues?.[col.id];
-                    let displayVal: string = "-";
-                    let colorClass: string = "text-slate-500 dark:text-slate-400";
-                    let sign: string = "";
-
-                    if (col.columnType === "number") {
-                      let val: number = 0;
-                      let txType: "masuk" | "keluar" = "masuk";
-                      if (typeof extraVal === "string") {
-                        val = Number(extraVal);
-                      } else if (extraVal && typeof extraVal === "object") {
-                        val = Number(extraVal.value);
-                        txType = extraVal.txType || "masuk";
-                      }
-                      if (val > 0) {
-                        displayVal = formatIDR(val);
-                        colorClass = txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400";
-                        sign = txType === "keluar" ? "−\u202f" : "";
-                      }
-                    } else {
-                      if (typeof extraVal === "string") {
-                        displayVal = extraVal || "-";
-                      } else if (extraVal && typeof extraVal === "object") {
-                        displayVal = extraVal.value || "-";
-                      }
-                    }
-
-                    return (
-                      <td
-                        key={col.id}
-                        className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-xs font-medium tabular-nums ${i < config.extraColumns.length - 1 ? "border-r" : ""} ${colorClass}`}
-                      >
-                        <span className="line-clamp-2">
-                          {sign}{displayVal}
-                        </span>
-                      </td>
-                    );
-                  })}
+      <div className="min-w-0 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex flex-col overflow-hidden" style={{ minHeight: 0, flex: "1 1 0" }}>
+        {displayedRows.length === 0 ? (
+          <div className="px-4 py-12 text-sm text-slate-400 dark:text-slate-500 text-center">
+            {isSearchMode ? "Tidak ada hasil pencarian." : "Belum ada data."}
+            {userCanEdit && !isSearchMode ? ' Klik "+" untuk menambahkan baris.' : ""}
+          </div>
+        ) : (
+          <div
+            className="w-full min-w-0 overflow-x-auto overflow-y-auto"
+            style={{
+              maxHeight: tableMaxHeight,
+              minHeight: 0,
+            }}
+          >
+            <table className="border-separate border-spacing-0 text-sm w-full" style={{ minWidth: `${Math.max(480, 160 + 140 + 140 + config.extraColumns.length * 140)}px` }}>
+              <colgroup>
+                <col style={{ minWidth: "160px", width: "22%" }} />
+                <col style={{ minWidth: "140px", width: "18%" }} />
+                <col style={{ minWidth: "140px", width: "20%" }} />
+                {config.extraColumns.map((col) => (
+                  <col key={col.id} style={{ minWidth: "140px", width: "140px" }} />
+                ))}
+              </colgroup>
+              <thead className="bg-slate-50 dark:bg-slate-900 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                <tr>
+                  <th className="sticky top-0 left-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
+                    {config.headerLabel}
+                  </th>
+                  <th className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
+                    {config.nominalLabel}
+                  </th>
+                  <th className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
+                    {config.noteLabel}
+                  </th>
+                  {config.extraColumns.map((col, i) => (
+                    <th
+                      key={col.id}
+                      className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${i < config.extraColumns.length - 1 || userCanEdit ? "border-r" : ""}`}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate max-w-[100px]">{col.label}</span>
+                        {userCanEdit && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingExtraColumn(col);
+                              setExtraColInput(col.label);
+                              setExtraColType(col.columnType);
+                              setOpenExtraColumnsModal(true);
+                            }}
+                            className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition"
+                            title={`Edit kolom "${col.label}"`}
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
+                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
+                            </svg>
+                          </button>
+                        )}
+                      </div>
+                    </th>
+                  ))}
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {displayedRows.map((row, idx) => (
+                  <tr
+                    key={row.id}
+                    className={`group hover:bg-slate-50 dark:hover:bg-slate-700/40 ${userCanEdit ? "cursor-pointer" : ""}`}
+                    onClick={userCanEdit ? () => openEditRow(row) : undefined}
+                  >
+                    {/* Kolom header — sticky */}
+                    <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/40 px-4 py-3 font-medium text-slate-900 dark:text-white transition-colors">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0 tabular-nums">{idx + 1}.</span>
+                        <span className="truncate max-w-[110px]">
+                          {config.headerLabelType === "number"
+                            ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
+                            : row.label}
+                        </span>
+                      </div>
+                    </td>
+                    {/* Nominal */}
+                    <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium tabular-nums">
+                      {config.nominalLabelType === "number" ? (
+                        <span className={row.txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}>
+                          {row.txType === "keluar" ? "−\u202f" : ""}{formatIDR(row.amount)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-700 dark:text-slate-300">{String(row.amount)}</span>
+                      )}
+                    </td>
+                    {/* Note */}
+                    <td className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
+                      <span className="line-clamp-2">
+                        {config.noteLabelType === "number"
+                          ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
+                          : (row.note || "-")}
+                      </span>
+                    </td>
+                    {/* Extra columns */}
+                    {config.extraColumns.map((col, i) => {
+                      const extraVal = row.extraValues?.[col.id];
+                      let displayVal: string = "-";
+                      let colorClass: string = "text-slate-500 dark:text-slate-400";
+                      let sign: string = "";
+
+                      if (col.columnType === "number") {
+                        let val: number = 0;
+                        let txType: "masuk" | "keluar" = "masuk";
+                        if (typeof extraVal === "string") {
+                          val = Number(extraVal);
+                        } else if (extraVal && typeof extraVal === "object") {
+                          val = Number(extraVal.value);
+                          txType = extraVal.txType || "masuk";
+                        }
+                        if (val > 0) {
+                          displayVal = formatIDR(val);
+                          colorClass = txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400";
+                          sign = txType === "keluar" ? "−\u202f" : "";
+                        }
+                      } else {
+                        if (typeof extraVal === "string") {
+                          displayVal = extraVal || "-";
+                        } else if (extraVal && typeof extraVal === "object") {
+                          displayVal = extraVal.value || "-";
+                        }
+                      }
+
+                      return (
+                        <td
+                          key={col.id}
+                          className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-xs font-medium tabular-nums ${i < config.extraColumns.length - 1 ? "border-r" : ""} ${colorClass}`}
+                        >
+                          <span className="line-clamp-2">
+                            {sign}{displayVal}
+                          </span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* FAB Tambah Baris */}
