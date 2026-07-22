@@ -16,5 +16,6 @@
     "strict": true,
     "types": ["vite/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/backup", "src/**/backup/**"]
 }
