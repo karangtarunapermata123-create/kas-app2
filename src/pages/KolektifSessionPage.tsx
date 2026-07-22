@@ -14,6 +14,7 @@ import {
   updateKolektifExtraColumn,
   deleteKolektifExtraColumn,
   saveKolektifRowExtraValues,
+  updateKolektifHiddenColumns,
 } from "../lib/store";
 import { formatIDR } from "../lib/money";
 import type { KolektifConfig, KolektifColumnType, KolektifExtraColumn, KolektifRow } from "../lib/types";
@@ -46,6 +47,9 @@ export default function KolektifSessionPage() {
     extraColumns: [],
   });
   const [loading, setLoading] = useState(true);
+
+  const [hiddenColumns, setHiddenColumns] = useState<Record<string, boolean>>({});
+  const [columnMenuKey, setColumnMenuKey] = useState<string | null>(null);
 
   // Modal tambah/edit baris
   const [openRowModal, setOpenRowModal] = useState(false);
@@ -135,6 +139,9 @@ export default function KolektifSessionPage() {
   const refresh = async () => {
     const cfg = await getKolektifConfig(safeSessionId);
     setConfig(cfg);
+    if (cfg.hiddenColumns) {
+      setHiddenColumns(cfg.hiddenColumns);
+    }
   };
 
   useEffect(() => {
@@ -148,6 +155,36 @@ export default function KolektifSessionPage() {
       return () => clearTimeout(t);
     }
   }, [loading, recalcTableHeight]);
+
+  function isColumnHidden(colKey: string): boolean {
+    return hiddenColumns[colKey] === true;
+  }
+
+  function toggleColumnHidden(colKey: string) {
+    setHiddenColumns((prev) => {
+      const next = { ...prev, [colKey]: !prev[colKey] };
+      updateKolektifHiddenColumns(safeSessionId, next).catch(() => setHiddenColumns(prev));
+      return next;
+    });
+    setColumnMenuKey(null);
+  }
+
+  function closeColumnMenu() {
+    setColumnMenuKey(null);
+  }
+
+  // Tutup menu saat klik di luar
+  useEffect(() => {
+    if (!columnMenuKey) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-column-menu]")) {
+        setColumnMenuKey(null);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [columnMenuKey]);
 
   // ── Row modal ──
   function openAddRow() {
@@ -536,41 +573,103 @@ export default function KolektifSessionPage() {
               </colgroup>
               <thead className="bg-slate-50 dark:bg-slate-900 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 <tr>
-                  <th className="sticky top-0 left-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
-                    {config.headerLabel}
+                  <th
+                    className={`sticky top-0 left-0 z-30 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${userCanEdit ? "cursor-pointer relative" : ""}`}
+                    onClick={() => userCanEdit && setColumnMenuKey(columnMenuKey === "header" ? null : "header")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[100px]">{config.headerLabel}</span>
+                      {isColumnHidden("header") && (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0 text-amber-500">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                        </svg>
+                      )}
+                    </div>
+                    {userCanEdit && columnMenuKey === "header" && (
+                      <div data-column-menu className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => toggleColumnHidden("header")}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
+                        >
+                          {isColumnHidden("header") ? "Tampilkan konten" : "Sembunyikan konten"}
+                        </button>
+                      </div>
+                    )}
                   </th>
-                  <th className="sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap">
-                    {config.nominalLabel}
+                  <th
+                    className={`sticky top-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${userCanEdit ? "cursor-pointer relative" : ""}`}
+                    onClick={() => userCanEdit && setColumnMenuKey(columnMenuKey === "nominal" ? null : "nominal")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[100px]">{config.nominalLabel}</span>
+                      {isColumnHidden("nominal") && (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0 text-amber-500">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                        </svg>
+                      )}
+                    </div>
+                    {userCanEdit && columnMenuKey === "nominal" && (
+                      <div data-column-menu className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => toggleColumnHidden("nominal")}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
+                        >
+                          {isColumnHidden("nominal") ? "Tampilkan konten" : "Sembunyikan konten"}
+                        </button>
+                      </div>
+                    )}
                   </th>
-                  <th className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
-                    {config.noteLabel}
+                  <th
+                    className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${config.extraColumns.length > 0 ? "border-r" : ""} ${userCanEdit ? "cursor-pointer relative" : ""}`}
+                    onClick={() => userCanEdit && setColumnMenuKey(columnMenuKey === "note" ? null : "note")}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate max-w-[100px]">{config.noteLabel}</span>
+                      {isColumnHidden("note") && (
+                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0 text-amber-500">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                        </svg>
+                      )}
+                    </div>
+                    {userCanEdit && columnMenuKey === "note" && (
+                      <div data-column-menu className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => toggleColumnHidden("note")}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
+                        >
+                          {isColumnHidden("note") ? "Tampilkan konten" : "Sembunyikan konten"}
+                        </button>
+                      </div>
+                    )}
                   </th>
                   {config.extraColumns.map((col, i) => (
                     <th
                       key={col.id}
-                      className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${i < config.extraColumns.length - 1 || userCanEdit ? "border-r" : ""}`}
+                      className={`sticky top-0 z-10 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-4 py-3 text-left whitespace-nowrap ${i < config.extraColumns.length - 1 || userCanEdit ? "border-r" : ""} ${userCanEdit ? "cursor-pointer relative" : ""}`}
+                      onClick={() => userCanEdit && setColumnMenuKey(columnMenuKey === `extra-${col.id}` ? null : `extra-${col.id}`)}
                     >
                       <div className="flex items-center gap-1.5">
                         <span className="truncate max-w-[100px]">{col.label}</span>
-                        {userCanEdit && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingExtraColumn(col);
-                              setExtraColInput(col.label);
-                              setExtraColType(col.columnType);
-                              setOpenExtraColumnsModal(true);
-                            }}
-                            className="shrink-0 rounded p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 opacity-0 group-hover:opacity-100 transition"
-                            title={`Edit kolom "${col.label}"`}
-                          >
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3">
-                              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/>
-                            </svg>
-                          </button>
+                        {isColumnHidden(`extra-${col.id}`) && (
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-3 w-3 shrink-0 text-amber-500">
+                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/>
+                          </svg>
                         )}
                       </div>
+                      {userCanEdit && columnMenuKey === `extra-${col.id}` && (
+                        <div data-column-menu className="absolute right-0 top-full mt-1 z-50 min-w-[160px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 shadow-lg overflow-hidden">
+                          <button
+                            type="button"
+                            onClick={() => toggleColumnHidden(`extra-${col.id}`)}
+                            className="w-full px-3 py-2 text-left text-xs font-medium text-slate-700 dark:text-slate-200 transition hover:bg-slate-50 dark:hover:bg-slate-700"
+                          >
+                            {isColumnHidden(`extra-${col.id}`) ? "Tampilkan konten" : "Sembunyikan konten"}
+                          </button>
+                        </div>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -584,18 +683,24 @@ export default function KolektifSessionPage() {
                   >
                     {/* Kolom header — sticky */}
                     <td className="sticky left-0 z-10 border-b border-r border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 group-hover:bg-slate-50 dark:group-hover:bg-slate-700/40 px-4 py-3 font-medium text-slate-900 dark:text-white transition-colors">
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0 tabular-nums">{idx + 1}.</span>
-                        <span className="truncate max-w-[110px]">
-                          {config.headerLabelType === "number"
-                            ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
-                            : row.label}
-                        </span>
-                      </div>
+                      {isColumnHidden("header") && !userCanEdit ? (
+                        <span className="text-slate-400">***</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-400 dark:text-slate-500 w-5 shrink-0 tabular-nums">{idx + 1}.</span>
+                          <span className="truncate max-w-[110px]">
+                            {config.headerLabelType === "number"
+                              ? (row.headerValue ? formatIDR(row.headerValue) : (row.label ? formatIDR(Number(row.label)) : "-"))
+                              : row.label}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     {/* Nominal */}
                     <td className="border-b border-r border-slate-200 dark:border-slate-700 px-4 py-3 font-medium tabular-nums">
-                      {config.nominalLabelType === "number" ? (
+                      {isColumnHidden("nominal") && !userCanEdit ? (
+                        <span className="text-slate-400">***</span>
+                      ) : config.nominalLabelType === "number" ? (
                         <span className={row.txType === "keluar" ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}>
                           {row.txType === "keluar" ? "−\u202f" : ""}{formatIDR(row.amount)}
                         </span>
@@ -605,11 +710,15 @@ export default function KolektifSessionPage() {
                     </td>
                     {/* Note */}
                     <td className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-slate-500 dark:text-slate-400 text-xs ${config.extraColumns.length > 0 ? "border-r" : ""}`}>
-                      <span className="line-clamp-2">
-                        {config.noteLabelType === "number"
-                          ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
-                          : (row.note || "-")}
-                      </span>
+                      {isColumnHidden("note") && !userCanEdit ? (
+                        <span className="text-slate-400">***</span>
+                      ) : (
+                        <span className="line-clamp-2">
+                          {config.noteLabelType === "number"
+                            ? (row.noteValue ? formatIDR(row.noteValue) : (row.note ? formatIDR(Number(row.note)) : "-"))
+                            : (row.note || "-")}
+                        </span>
+                      )}
                     </td>
                     {/* Extra columns */}
                     {config.extraColumns.map((col, i) => {
@@ -643,10 +752,10 @@ export default function KolektifSessionPage() {
                       return (
                         <td
                           key={col.id}
-                          className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-xs font-medium tabular-nums ${i < config.extraColumns.length - 1 ? "border-r" : ""} ${colorClass}`}
+                          className={`border-b border-slate-200 dark:border-slate-700 px-4 py-3 text-xs font-medium tabular-nums ${i < config.extraColumns.length - 1 ? "border-r" : ""} ${isColumnHidden(`extra-${col.id}`) && !userCanEdit ? "text-slate-400" : colorClass}`}
                         >
                           <span className="line-clamp-2">
-                            {sign}{displayVal}
+                            {isColumnHidden(`extra-${col.id}`) && !userCanEdit ? "***" : `${sign}${displayVal}`}
                           </span>
                         </td>
                       );

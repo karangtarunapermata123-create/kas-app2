@@ -54,6 +54,7 @@ export type KolektifConfig = {
   noteLabelType: KolektifColumnType;
   rows: KolektifRow[];
   extraColumns: KolektifExtraColumn[];
+  hiddenColumns?: Record<string, boolean>;
 };
 
 export type Category = {
@@ -168,4 +169,25 @@ export type AttendanceRecord = {
   fineAmount?: number; // hanya diisi saat status === "denda"
   note?: string;
   timestamp: string;
+};
+
+export type NoteColor = "white" | "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "indigo" | "purple";
+
+export type Note = {
+  id: string;
+  title: string;
+  body: string;
+  color: NoteColor;
+  pinned: boolean;
+  folderId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NoteFolder = {
+  id: string;
+  name: string;
+  parentId: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

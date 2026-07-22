@@ -196,6 +196,14 @@ export async function getKolektifConfig(
     };
   });
   
+  let hiddenColumns: Record<string, boolean> = {};
+  if (configRes.data) {
+    const data = configRes.data as any;
+    if (data.hidden_columns && typeof data.hidden_columns === "object") {
+      hiddenColumns = data.hidden_columns as Record<string, boolean>;
+    }
+  }
+  
   return { 
     sessionId, 
     headerLabel, 
@@ -206,6 +214,7 @@ export async function getKolektifConfig(
     noteLabelType,
     rows,
     extraColumns,
+    hiddenColumns,
   };
 }
 
@@ -339,6 +348,17 @@ export async function updateKolektifLabels(
       throw error;
     }
   }
+}
+
+export async function updateKolektifHiddenColumns(
+  sessionId: string,
+  hiddenColumns: Record<string, boolean>,
+): Promise<void> {
+  const { error } = await supabase.from("kolektif_config").upsert({
+    session_id: sessionId,
+    hidden_columns: hiddenColumns,
+  });
+  if (error) throw error;
 }
 
 export async function addKolektifRow(

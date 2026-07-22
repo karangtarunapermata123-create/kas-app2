@@ -9,6 +9,7 @@ import {
 import { useState, useEffect, useRef } from "react";
 import AbsensiPage from "./pages/AbsensiPage";
 import BukuKasPage from "./pages/BukuKasPage";
+import CatatanPage from "./pages/CatatanPage";
 import PengaturanPage from "./pages/PengaturanPage";
 import KelolaUserPage from "./pages/KelolaUserPage";
 import ProfilPage from "./pages/ProfilPage";
@@ -131,6 +132,26 @@ function IconUser(props: { className?: string }) {
   );
 }
 
+function IconNote(props: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={props.className}
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <line x1="10" y1="9" x2="8" y2="9" />
+    </svg>
+  );
+}
+
 // ── App Shell ─────────────────────────────────────────────────────────────────
 
 function AppShell() {
@@ -238,14 +259,16 @@ function AppShell() {
       ) {
         const sessions = await getSessionsByActivity(parts[1]);
         title = sessions.find((s) => s.id === parts[3])?.label ?? "Sesi";
-        backTo = `/absensi/${parts[1]}`;
+        backTo = location.state?.backTo ?? `/absensi/${parts[1]}`;
       } else if (parts[0] === "absensi" && parts[1]) {
         const activities = await getActivities();
         title =
           activities.find((a) => a.id === parts[1])?.name ?? "Detail Kegiatan";
-        backTo = "/absensi";
+        backTo = location.state?.backTo ?? "/absensi";
       } else if (parts[0] === "absensi") {
         title = "Absensi";
+      } else if (parts[0] === "catatan") {
+        title = "Catatan";
       } else if (parts[0] === "pengaturan") {
         title = "Pengaturan";
       } else if (parts[0] === "kelola-user") {
@@ -325,6 +348,14 @@ function AppShell() {
               <span className={spanClass}>Buku kas</span>
             </NavLink>
             <NavLink
+              to="/catatan"
+              className={({ isActive }) => navLinkClass(isActive)}
+              title="Catatan"
+            >
+              <IconNote className="h-5 w-5 shrink-0" />
+              <span className={spanClass}>Catatan</span>
+            </NavLink>
+            <NavLink
               to="/absensi"
               className={({ isActive }) => navLinkClass(isActive)}
               title="Absensi"
@@ -389,7 +420,14 @@ function AppShell() {
                   <button
                     type="button"
                     className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                    onClick={() => navigate(header.backTo!)}
+                    onClick={() => {
+                      const backToState = location.state?.backToState;
+                      if (backToState) {
+                        navigate(header.backTo!, { state: backToState });
+                      } else {
+                        navigate(header.backTo!);
+                      }
+                    }}
                   >
                     Kembali
                   </button>
@@ -424,7 +462,14 @@ function AppShell() {
                 <button
                   type="button"
                   className="rounded-lg border dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-                  onClick={() => navigate(header.backTo!)}
+                  onClick={() => {
+                    const backToState = location.state?.backToState;
+                    if (backToState) {
+                      navigate(header.backTo!, { state: backToState });
+                    } else {
+                      navigate(header.backTo!);
+                    }
+                  }}
                 >
                   Kembali
                 </button>
@@ -467,6 +512,7 @@ function AppShell() {
                 path="/absensi/:activityId/sesi/:sessionId"
                 element={<AbsensiPage />}
               />
+              <Route path="/catatan" element={<CatatanPage />} />
               <Route path="/pengaturan" element={<PengaturanPage />} />
               <Route path="/kelola-user" element={<KelolaUserPage />} />
               <Route path="/profil" element={<ProfilPage />} />
@@ -476,7 +522,7 @@ function AppShell() {
 
           {/* Bottom nav mobile */}
           <nav className="fixed bottom-0 left-0 right-0 z-40 border-t bg-white dark:bg-slate-900 dark:border-slate-800 md:hidden">
-            <div className="grid grid-cols-3">
+            <div className="grid grid-cols-4">
               <NavLink
                 to="/buku-kas"
                 className={({ isActive }) =>
@@ -491,6 +537,23 @@ function AppShell() {
                   <>
                     <IconBook className={`h-4 w-4 mb-0.5 ${isActive ? "stroke-[2.5]" : ""}`} />
                     <span className={`relative ${isActive ? "font-semibold after:absolute after:-bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-0.5 after:w-5 after:rounded-full after:bg-slate-900 dark:after:bg-white" : ""}`}>Kas</span>
+                  </>
+                )}
+              </NavLink>
+              <NavLink
+                to="/catatan"
+                className={({ isActive }) =>
+                  `flex flex-col items-center justify-center pt-2 pb-[calc(0.25rem+env(safe-area-inset-bottom))] text-[10px] font-medium transition ${
+                    isActive
+                      ? "text-slate-900 dark:text-white"
+                      : "text-slate-400 dark:text-slate-500"
+                  }`
+                }
+              >
+                {({ isActive }) => (
+                  <>
+                    <IconNote className={`h-4 w-4 mb-0.5 ${isActive ? "stroke-[2.5]" : ""}`} />
+                    <span className={`relative ${isActive ? "font-semibold after:absolute after:-bottom-0.5 after:left-1/2 after:-translate-x-1/2 after:h-0.5 after:w-5 after:rounded-full after:bg-slate-900 dark:after:bg-white" : ""}`}>Catatan</span>
                   </>
                 )}
               </NavLink>

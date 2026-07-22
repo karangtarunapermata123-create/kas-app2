@@ -5,7 +5,7 @@ import Input from "../components/Input";
 import Modal from "../components/Modal";
 import TransactionsPage from "./TransactionsPage";
 import RoutineBookPage from "./RoutineBookPage";
-import { useAuth, canEditBook } from "../lib/auth";
+import { useAuth, canEditBook, canEditAttendance } from "../lib/auth";
 import type { Profile } from "../lib/auth";
 import {
   getKolektifSessions,
@@ -30,6 +30,11 @@ import {
   getActivityFineTotal,
   getActivities,
   getAttendanceRecords,
+  getAttendanceByActivity,
+  getAttendanceBySession,
+  addAttendanceRecord,
+  updateAttendanceRecord,
+  deleteAttendanceRecord,
   getSessionsByActivity,
   linkBookToKolektif,
   unlinkBookFromKolektif,
@@ -39,6 +44,7 @@ import {
 } from "../lib/store";
 import { getAllProfiles } from "../lib/users";
 import { formatIDR } from "../lib/money";
+import { supabase } from "../lib/supabase";
 import type { Book, KolektifSession, KolektifColumnType, KolektifExtraColumn, Activity, ActivitySession, AttendanceRecord } from "../lib/types";
 import type { LinkedActivity } from "../lib/store";
 
@@ -124,6 +130,22 @@ export default function KolektifPage() {
     canEditBook(profile, safeBookId).then(setUserCanEdit);
   }, [profile, safeBookId]);
 
+  useEffect(() => {
+    setUserCanEditAttendance(canEditAttendance(profile?.role));
+  }, [profile]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const data = await getAllProfiles();
+      if (!cancelled) setAllProfiles(data);
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Tab state: "sub-buku" | "transaksi" | "kolektif" | "rutinan"
   const [activeTab, setActiveTab] = useState<"sub-buku" | "transaksi" | "kolektif" | "rutinan" | "absensi">("sub-buku");
   const [selectedLinkedBookId, setSelectedLinkedBookId] = useState<string | null>(null);
@@ -202,6 +224,16 @@ export default function KolektifPage() {
   const [allActivities, setAllActivities] = useState<Activity[]>([]);
   const [linkedActivityRecords, setLinkedActivityRecords] = useState<Record<string, AttendanceRecord[]>>({});
   const [linkedActivitySessions, setLinkedActivitySessions] = useState<Record<string, ActivitySession[]>>({});
+  const [userCanEditAttendance, setUserCanEditAttendance] = useState(false);
+  const [openAttendanceStatusModal, setOpenAttendanceStatusModal] = useState(false);
+  const [activeAttendanceProfileId, setActiveAttendanceProfileId] = useState<string | null>(null);
+  const [activeAttendanceMemberName, setActiveAttendanceMemberName] = useState<string | null>(null);
+  const [activeAttendanceStatus, setActiveAttendanceStatus] = useState<AttendanceRecord["status"] | null>(null);
+  const [activeAttendanceFineAmount, setActiveAttendanceFineAmount] = useState<number | undefined>(undefined);
+  const [activeAttendanceSessionId, setActiveAttendanceSessionId] = useState<string | null>(null);
+  const [attendanceFineInput, setAttendanceFineInput] = useState("");
+  const [showAttendanceFineInput, setShowAttendanceFineInput] = useState(false);
+  const [allProfiles, setAllProfiles] = useState<Profile[]>([]);
   // Modal tambah sub-buku
   const [openAddModal, setOpenAddModal] = useState(false);
   const [newName, setNewName] = useState("");
@@ -421,16 +453,37 @@ export default function KolektifPage() {
       return linkedRoutine[0]?.id ?? null;
     });
 
-    return { list, linked, linkedKolektif, linkedRoutine };
+    return { list, linked, linkedKolektif, linkedRoutine, linkedActivities: activities };
   };
 
   useEffect(() => {
-    const autoTab = (location.state as { autoTab?: boolean } | null)?.autoTab;
+    const state = location.state as { autoTab?: boolean | "absensi" | "transaksi"; selectedLinkedActivityId?: string; selectedLinkedBookId?: string } | null;
+    const autoTab = state?.autoTab;
     setLoading(true);
     refresh().then((data) => {
       if (autoTab && data) {
-        const { linked, linkedKolektif, linkedRoutine, list } = data;
-        if (linked.length > 0) {
+        const { linked, linkedKolektif, linkedRoutine, list, linkedActivities: activities } = data;
+        if (autoTab === "absensi") {
+          if (activities.length > 0) {
+            setActiveTab("absensi");
+            const targetId = state?.selectedLinkedActivityId;
+            setSelectedLinkedActivityId((prev) => {
+              if (prev && activities.some((a) => a.id === prev)) return prev;
+              if (targetId && activities.some((a) => a.id === targetId)) return targetId;
+              return activities[0]?.id ?? null;
+            });
+          }
+        } else if (autoTab === "transaksi") {
+          if (linked.length > 0) {
+            setActiveTab("transaksi");
+            const targetId = state?.selectedLinkedBookId;
+            setSelectedLinkedBookId((prev) => {
+              if (prev && linked.some((b) => b.id === prev)) return prev;
+              if (targetId && linked.some((b) => b.id === targetId)) return targetId;
+              return linked[0]?.id ?? null;
+            });
+          }
+        } else if (linked.length > 0) {
           setSelectedLinkedBookId(linked[0].id);
           setActiveTab("transaksi");
         } else if (linkedKolektif.length > 0) {
@@ -445,6 +498,39 @@ export default function KolektifPage() {
       }
     }).finally(() => setLoading(false));
   }, [safeBookId]);
+
+  const refreshRecordsRef = useRef<((activityId: string) => void) | null>(null);
+  useEffect(() => {
+    refreshRecordsRef.current = refreshAttendanceRecords;
+  }, [refreshAttendanceRecords]);
+
+  useEffect(() => {
+    if (linkedActivities.length === 0) return;
+    const channelName = `kolektif-absensi-${safeBookId}`;
+    const channel = supabase.channel(channelName);
+
+    linkedActivities.forEach((a) => {
+      if (a.type === "rutin") {
+        channel.on("postgres_changes", { event: "*", schema: "public", table: "attendance_records" }, () => {
+          refreshRecordsRef.current?.(a.id);
+        });
+      } else {
+        channel.on("postgres_changes", {
+          event: "*",
+          schema: "public",
+          table: "attendance_records",
+          filter: `activity_id=eq.${a.id}`,
+        }, () => {
+          refreshRecordsRef.current?.(a.id);
+        });
+      }
+    });
+
+    channel.subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [linkedActivities, safeBookId]);
 
   const subBukuGrandTotal = sessions.reduce(
     (sum, s) => sum + (sessionTotals[s.id] ?? 0),
@@ -511,6 +597,120 @@ export default function KolektifPage() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function handleOpenAttendanceStatus(
+    profileId: string,
+    memberName: string,
+    currentStatus: AttendanceRecord["status"] | null,
+    currentFineAmount?: number,
+    sessionId?: string,
+  ) {
+    setActiveAttendanceProfileId(profileId);
+    setActiveAttendanceMemberName(memberName);
+    setActiveAttendanceStatus(currentStatus);
+    setActiveAttendanceFineAmount(currentFineAmount);
+    setActiveAttendanceSessionId(sessionId ?? null);
+    setAttendanceFineInput(currentFineAmount != null ? String(currentFineAmount) : "");
+    setShowAttendanceFineInput(currentStatus === "denda");
+    setOpenAttendanceStatusModal(true);
+  }
+
+  async function handleSetAttendanceStatus(status: AttendanceRecord["status"], fineAmount?: number) {
+    if (!activeAttendanceProfileId || !activeAttendanceMemberName || !selectedLinkedActivityId) return;
+
+    const targetSessionId = activeAttendanceSessionId;
+    const activity = linkedActivities.find((a) => a.id === selectedLinkedActivityId);
+    if (!activity) return;
+
+    let existingRecord: AttendanceRecord | undefined;
+    if (targetSessionId) {
+      existingRecord = linkedActivityRecords[activity.id]?.find(
+        (r) => r.sessionId === targetSessionId && r.memberName.toLowerCase().trim() === activeAttendanceMemberName.toLowerCase().trim(),
+      );
+    } else {
+      existingRecord = linkedActivityRecords[activity.id]?.find(
+        (r) => r.memberName.toLowerCase().trim() === activeAttendanceMemberName.toLowerCase().trim(),
+      );
+    }
+
+    if (existingRecord) {
+      await updateAttendanceRecord(existingRecord.id, {
+        status,
+        fineAmount: status === "denda" ? fineAmount : undefined,
+      });
+    } else {
+      await addAttendanceRecord({
+        activityId: activity.id,
+        sessionId: targetSessionId ?? undefined,
+        memberName: activeAttendanceMemberName,
+        status,
+        fineAmount: status === "denda" ? fineAmount : undefined,
+      });
+    }
+
+    await refreshAttendanceRecords(activity.id);
+    setOpenAttendanceStatusModal(false);
+    setActiveAttendanceProfileId(null);
+    setActiveAttendanceMemberName(null);
+    setActiveAttendanceStatus(null);
+    setActiveAttendanceFineAmount(undefined);
+    setActiveAttendanceSessionId(null);
+    setAttendanceFineInput("");
+    setShowAttendanceFineInput(false);
+  }
+
+  async function handleDeleteAttendanceStatus() {
+    if (!activeAttendanceMemberName || !selectedLinkedActivityId) return;
+
+    const targetSessionId = activeAttendanceSessionId;
+    const activity = linkedActivities.find((a) => a.id === selectedLinkedActivityId);
+    if (!activity) return;
+
+    let existingRecord: AttendanceRecord | undefined;
+    if (targetSessionId) {
+      existingRecord = linkedActivityRecords[activity.id]?.find(
+        (r) => r.sessionId === targetSessionId && r.memberName.toLowerCase().trim() === activeAttendanceMemberName.toLowerCase().trim(),
+      );
+    } else {
+      existingRecord = linkedActivityRecords[activity.id]?.find(
+        (r) => r.memberName.toLowerCase().trim() === activeAttendanceMemberName.toLowerCase().trim(),
+      );
+    }
+
+    if (existingRecord) {
+      await deleteAttendanceRecord(existingRecord.id);
+      await refreshAttendanceRecords(activity.id);
+    }
+
+    setOpenAttendanceStatusModal(false);
+    setActiveAttendanceProfileId(null);
+    setActiveAttendanceMemberName(null);
+    setActiveAttendanceStatus(null);
+    setActiveAttendanceFineAmount(undefined);
+    setActiveAttendanceSessionId(null);
+    setAttendanceFineInput("");
+    setShowAttendanceFineInput(false);
+  }
+
+  async function refreshAttendanceRecords(activityId: string) {
+    const activity = linkedActivities.find((a) => a.id === activityId);
+    if (!activity) return;
+
+    let records: AttendanceRecord[];
+    if (activity.type === "rutin") {
+      const allRecs = await getAttendanceRecords();
+      records = allRecs.filter((r) => r.activityId === activityId);
+    } else {
+      records = await getAttendanceByActivity(activityId);
+    }
+
+    const sessions = await getSessionsByActivity(activityId);
+    const fineTotal = await getActivityFineTotal(activityId);
+
+    setLinkedActivityRecords((prev) => ({ ...prev, [activityId]: records }));
+    setLinkedActivitySessions((prev) => ({ ...prev, [activityId]: sessions }));
+    setLinkedActivityFineTotals((prev) => ({ ...prev, [activityId]: fineTotal }));
   }
 
   async function openAddRoutineBookModalFn() {
@@ -1355,21 +1555,38 @@ export default function KolektifPage() {
                               {sessions.map((s) => {
                                 const rec = records.find((r) => r.sessionId === s.id && r.memberName === name);
                                 const st = rec?.status ?? null;
+                                const fineAmount = rec?.fineAmount;
                                 return (
                                   <td key={s.id} className="border-b border-r border-slate-200 dark:border-slate-700 px-2 py-2 text-center">
                                     {st === "denda" ? (
-                                      <span className="text-xs font-bold text-rose-600 dark:text-rose-400 tabular-nums">
-                                        {rec?.fineAmount ? `Rp ${rec.fineAmount.toLocaleString("id-ID")}` : "Denda"}
-                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => userCanEditAttendance && handleOpenAttendanceStatus(allProfiles.find((p) => p.full_name === name)?.id ?? "", name, st, fineAmount, s.id)}
+                                        disabled={!userCanEditAttendance}
+                                        className={`text-xs font-bold tabular-nums text-rose-600 dark:text-rose-400 transition ${userCanEditAttendance ? "hover:text-rose-800 cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                                      >
+                                        {fineAmount ? `Rp ${fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                                      </button>
                                     ) : (
-                                      <span className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[11px] font-bold ${
-                                        st === "hadir" ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                                        : st === "izin" ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                                        : st === "tidak-hadir" ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
-                                        : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
-                                      }`}>
+                                      <button
+                                        type="button"
+                                        onClick={() => userCanEditAttendance && handleOpenAttendanceStatus(allProfiles.find((p) => p.full_name === name)?.id ?? "", name, st, undefined, s.id)}
+                                        disabled={!userCanEditAttendance}
+                                        className={`inline-flex h-5 w-5 items-center justify-center rounded border text-[11px] font-bold transition ${
+                                          userCanEditAttendance ? "hover:scale-110 cursor-pointer" : "cursor-not-allowed opacity-60"
+                                        } ${
+                                          st === "hadir"
+                                            ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                            : st === "izin"
+                                            ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                            : st === "tidak-hadir"
+                                            ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                            : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
+                                        }`}
+                                        aria-label="Ubah status kehadiran"
+                                      >
                                         {st === "hadir" ? "✓" : st === "izin" ? "~" : st === "tidak-hadir" ? "✗" : ""}
-                                      </span>
+                                      </button>
                                     )}
                                   </td>
                                 );
@@ -1392,23 +1609,40 @@ export default function KolektifPage() {
                           {memberNames.map((name) => {
                             const rec = records.find((r) => r.memberName === name);
                             const st = rec?.status ?? null;
+                            const fineAmount = rec?.fineAmount;
                             return (
                               <tr key={name} className="border-t border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40">
                                 <td className="px-4 py-2 font-medium text-slate-900 dark:text-white">{name}</td>
                                 <td className="px-4 py-2 text-center">
                                   {st === "denda" ? (
-                                    <span className="text-sm font-bold text-rose-600 dark:text-rose-400 tabular-nums">
-                                      {rec?.fineAmount ? `Rp ${rec.fineAmount.toLocaleString("id-ID")}` : "Denda"}
-                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => userCanEditAttendance && handleOpenAttendanceStatus(allProfiles.find((p) => p.full_name === name)?.id ?? "", name, st, fineAmount)}
+                                      disabled={!userCanEditAttendance}
+                                      className={`text-sm font-bold tabular-nums text-rose-600 dark:text-rose-400 transition ${userCanEditAttendance ? "hover:text-rose-800 cursor-pointer" : "cursor-not-allowed opacity-60"}`}
+                                    >
+                                      {fineAmount ? `Rp ${fineAmount.toLocaleString("id-ID")}` : "Denda"}
+                                    </button>
                                   ) : (
-                                    <span className={`inline-flex h-6 w-6 items-center justify-center rounded border text-xs font-bold ${
-                                      st === "hadir" ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
-                                      : st === "izin" ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
-                                      : st === "tidak-hadir" ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
-                                      : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
-                                    }`}>
+                                    <button
+                                      type="button"
+                                      onClick={() => userCanEditAttendance && handleOpenAttendanceStatus(allProfiles.find((p) => p.full_name === name)?.id ?? "", name, st)}
+                                      disabled={!userCanEditAttendance}
+                                      className={`inline-flex h-6 w-6 items-center justify-center rounded border text-xs font-bold transition ${
+                                        userCanEditAttendance ? "hover:scale-110 cursor-pointer" : "cursor-not-allowed opacity-60"
+                                      } ${
+                                        st === "hadir"
+                                          ? "border-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300"
+                                          : st === "izin"
+                                          ? "border-amber-300 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300"
+                                          : st === "tidak-hadir"
+                                          ? "border-rose-300 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300"
+                                          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-400"
+                                      }`}
+                                      aria-label="Ubah status kehadiran"
+                                    >
                                       {st === "hadir" ? "✓" : st === "izin" ? "~" : st === "tidak-hadir" ? "✗" : ""}
-                                    </span>
+                                    </button>
                                   )}
                                 </td>
                               </tr>
@@ -1426,6 +1660,141 @@ export default function KolektifPage() {
 
         </div>
       </div>
+
+      {/* Modal status kehadiran untuk tab absensi */}
+      <Modal
+        open={openAttendanceStatusModal}
+        title={activeAttendanceMemberName ? `Kehadiran — ${activeAttendanceMemberName}` : "Status Kehadiran"}
+        onClose={() => {
+          setOpenAttendanceStatusModal(false);
+          setActiveAttendanceProfileId(null);
+          setActiveAttendanceMemberName(null);
+          setActiveAttendanceStatus(null);
+          setActiveAttendanceFineAmount(undefined);
+          setActiveAttendanceSessionId(null);
+          setAttendanceFineInput("");
+          setShowAttendanceFineInput(false);
+        }}
+      >
+        <div className="grid gap-2">
+          {(
+            [
+              {
+                status: "hadir" as const,
+                label: "Hadir",
+                desc: "Anggota hadir dalam kegiatan ini",
+                color: "border-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/30",
+              },
+              {
+                status: "izin" as const,
+                label: "Izin",
+                desc: "Anggota tidak hadir dengan keterangan",
+                color: "border-amber-400 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/30",
+              },
+              {
+                status: "tidak-hadir" as const,
+                label: "Tidak Hadir",
+                desc: "Anggota tidak hadir tanpa keterangan",
+                color: "border-rose-400 bg-rose-50 dark:bg-rose-900/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/30",
+              },
+            ]
+          ).map(({ status, label, desc, color }) => (
+            <button
+              key={status}
+              type="button"
+              onClick={() => {
+                setShowAttendanceFineInput(false);
+                handleSetAttendanceStatus(status);
+              }}
+              className={`flex w-full items-center gap-3 rounded-lg border-2 px-4 py-3 text-left transition ${
+                activeAttendanceStatus === status
+                  ? color
+                  : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              }`}
+            >
+              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${activeAttendanceStatus === status ? color : "border-slate-300 text-slate-400"}`}>
+                {status === "hadir" ? "✓" : status === "izin" ? "~" : "✗"}
+              </span>
+              <div>
+                <div className="text-sm font-medium">{label}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">{desc}</div>
+              </div>
+              {activeAttendanceStatus === status && <span className="ml-auto text-xs font-medium">Aktif</span>}
+            </button>
+          ))}
+
+          {/* Denda */}
+          <div className={`rounded-lg border-2 transition ${
+            activeAttendanceStatus === "denda"
+              ? "border-orange-400 bg-orange-50 dark:bg-orange-900/20"
+              : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800"
+          }`}>
+            <button
+              type="button"
+              onClick={() => setShowAttendanceFineInput((v) => !v)}
+              className="flex w-full items-center gap-3 px-4 py-3 text-left"
+            >
+              <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold ${
+                activeAttendanceStatus === "denda"
+                  ? "border-orange-400 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300"
+                  : "border-slate-300 text-slate-400"
+              }`}>
+                Rp
+              </span>
+              <div className="flex-1">
+                <div className={`text-sm font-medium ${activeAttendanceStatus === "denda" ? "text-orange-700 dark:text-orange-300" : "text-slate-700 dark:text-slate-300"}`}>
+                  Denda
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeAttendanceStatus === "denda" && activeAttendanceFineAmount
+                    ? `Rp ${activeAttendanceFineAmount.toLocaleString("id-ID")}`
+                    : "Masukkan nominal denda"}
+                </div>
+              </div>
+              {activeAttendanceStatus === "denda" && <span className="ml-auto text-xs font-medium text-orange-600 dark:text-orange-400">Aktif</span>}
+            </button>
+
+            {/* Input nominal denda */}
+            {showAttendanceFineInput && (
+              <div className="border-t border-slate-200 dark:border-slate-700 px-4 pb-3 pt-2">
+                <div className="flex items-center gap-2">
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">Rp</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={attendanceFineInput ? Number(attendanceFineInput).toLocaleString("id-ID") : ""}
+                      onChange={(e) => setAttendanceFineInput(e.target.value.replace(/\D/g, ""))}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 py-2 pl-10 pr-3 text-sm text-slate-900 dark:text-white outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400"
+                      autoFocus
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!attendanceFineInput || Number(attendanceFineInput) <= 0}
+                    onClick={() => handleSetAttendanceStatus("denda", Number(attendanceFineInput))}
+                    className="rounded-lg bg-orange-500 px-3 py-2 text-sm font-medium text-white hover:bg-orange-600 disabled:opacity-40 transition"
+                  >
+                    Simpan
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tombol Hapus */}
+          {activeAttendanceStatus !== null && (
+            <button
+              type="button"
+              onClick={handleDeleteAttendanceStatus}
+              className="mt-2 w-full rounded-lg border-2 border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+            >
+              Hapus (Kosongkan Status)
+            </button>
+          )}
+        </div>
+      </Modal>
 
       {/* Modal atur kolom template — wajib sebelum buat sub-buku pertama */}
       <Modal
@@ -1727,7 +2096,25 @@ export default function KolektifPage() {
               </button>
             </div>
           )}
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center pt-1 border-t dark:border-slate-700">
+            <button
+              type="button"
+              onClick={() => {
+                setOpenLinkedActivityModal(false);
+                navigate(`/absensi/${selectedLinkedActivityId}`, {
+                  state: {
+                    backTo: `/buku-kas-kolektif/${safeBookId}`,
+                    backToState: {
+                      autoTab: "absensi",
+                      selectedLinkedActivityId,
+                    },
+                  },
+                });
+              }}
+              className="text-sm text-slate-700 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white font-medium"
+            >
+              Buka Halaman Absensi
+            </button>
             <Button variant="secondary" onClick={() => setOpenLinkedActivityModal(false)}>Tutup</Button>
           </div>
         </div>
@@ -2000,7 +2387,15 @@ export default function KolektifPage() {
             type="button"
             onClick={() => {
               setOpenLinkedBookModal(false);
-              navigate(`/buku-kas/${selectedLinkedBookId}`);
+              navigate(`/buku-kas/${selectedLinkedBookId}`, {
+                state: {
+                  backTo: `/buku-kas-kolektif/${safeBookId}`,
+                  backToState: {
+                    autoTab: "transaksi",
+                    selectedLinkedBookId,
+                  },
+                },
+              });
             }}
             className="flex items-center justify-between rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-4 py-3 text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition"
           >
