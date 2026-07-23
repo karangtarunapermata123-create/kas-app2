@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import Button from "../components/Button";
 import Modal from "../components/Modal";
 import Input from "../components/Input";
@@ -177,6 +177,103 @@ function IconLock(props: { className?: string }) {
   );
 }
 
+function IconBold(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <path d="M6 12h9a4 4 0 0 1 0 8H6V4h8a4 4 0 0 1 0 8" />
+    </svg>
+  );
+}
+
+function IconItalic(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <line x1="19" y1="4" x2="10" y2="4" />
+      <line x1="14" y1="20" x2="5" y2="20" />
+      <line x1="15" y1="4" x2="9" y2="20" />
+    </svg>
+  );
+}
+
+function IconUnderline(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <path d="M6 3v7a6 6 0 0 0 12 0V3" />
+      <line x1="4" y1="21" x2="20" y2="21" />
+    </svg>
+  );
+}
+
+function IconStrikethrough(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <path d="M17.3 19c.6-1.2 1-2.5 1-3.8 0-2.3-1.3-4.3-3.4-5.7" />
+      <path d="M6.7 19c-.6-1.2-1-2.5-1-3.8 0-2.3 1.3-4.3 3.4-5.7" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+    </svg>
+  );
+}
+
+function IconListBullet(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function IconListNumber(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <line x1="10" y1="6" x2="21" y2="6" />
+      <line x1="10" y1="12" x2="21" y2="12" />
+      <line x1="10" y1="18" x2="21" y2="18" />
+      <path d="M4 6h1v4" />
+      <path d="M4 14h2" />
+      <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+    </svg>
+  );
+}
+
+function IconHighlight(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <path d="m9 11-6 6 3.5 3.5L17 14l-2.5-2.5L13 10l-2 1z" />
+      <path d="m14 3 5 5-7 7H9l-5-5 7-7h3z" transform="translate(2, 2) scale(0.8)" />
+    </svg>
+  );
+}
+
+function IconTextSize(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <polyline points="4 7 4 4 20 4 20 7" />
+      <line x1="9" y1="20" x2="15" y2="20" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  );
+}
+
+function IconClearFormat(props: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className} aria-hidden="true">
+      <path d="m7 21-4.3-4.3" />
+      <path d="M17 3l4 4" />
+      <path d="M21 3l-4 4" />
+      <path d="M3 21l4-4" />
+      <path d="M7 3v4" />
+      <path d="M17 3v4" />
+      <path d="M3 21h4" />
+      <path d="M17 21h4" />
+    </svg>
+  );
+}
+
 export default function CatatanPage() {
   const { profile } = useAuth();
   const canEditNotes = canEdit(profile?.role);
@@ -210,6 +307,44 @@ export default function CatatanPage() {
   const [arrowMenuIndex, setArrowMenuIndex] = useState<number | null>(null);
   const [arrowMenuPos, setArrowMenuPos] = useState<{ top: number; left: number } | null>(null);
   const [activeNotePage, setActiveNotePage] = useState<"pinned" | "explorer">("pinned");
+
+  const createEditorRef = useRef<HTMLDivElement>(null);
+  const editEditorRef = useRef<HTMLDivElement>(null);
+  const [activeEditor, setActiveEditor] = useState<"create" | "edit" | null>(null);
+
+  function execCmd(command: string, value?: string) {
+    const editor = activeEditor === "edit" ? editEditorRef.current : createEditorRef.current;
+    if (editor) {
+      editor.focus();
+    }
+    document.execCommand(command, false, value);
+  }
+
+  useEffect(() => {
+    if (!activeEditor) return;
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const isEditorClick = target.closest("[contenteditable=true]") || target.closest("[contenteditable]");
+      const isToolbarClick = target.closest("[title]") || target.closest("select");
+      if (!isEditorClick && !isToolbarClick) {
+        setActiveEditor(null);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [activeEditor]);
+
+  function syncCreateEditor() {
+    if (createEditorRef.current) {
+      setCreateBody(createEditorRef.current.innerHTML);
+    }
+  }
+
+  function syncEditEditor() {
+    if (editEditorRef.current) {
+      setEditDetailBody(editEditorRef.current.innerHTML);
+    }
+  }
 
   // Initial data fetch + migration
   useEffect(() => {
@@ -254,6 +389,26 @@ export default function CatatanPage() {
       unsubFolders();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isCreatingNote) return;
+    const t = setTimeout(() => {
+      if (createEditorRef.current) {
+        createEditorRef.current.innerHTML = createBody || "";
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [isCreatingNote]);
+
+  useEffect(() => {
+    if (!isEditingDetail) return;
+    const t = setTimeout(() => {
+      if (editEditorRef.current) {
+        editEditorRef.current.innerHTML = editDetailBody || "";
+      }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [isEditingDetail]);
 
   // Close menus on outside click
   useEffect(() => {
@@ -447,8 +602,9 @@ export default function CatatanPage() {
   async function saveDetailEdit() {
     if (!canEditNotes || !viewingNote) return;
     const title = editDetailTitle.trim();
-    const body = editDetailBody.trim();
-    if (!title && !body) return;
+    const body = editEditorRef.current?.innerHTML || editDetailBody;
+    const text = editEditorRef.current?.textContent || editDetailBody;
+    if (!title && !text?.trim()) return;
     const updated = await updateNote(viewingNote.id, { title, body, color: editDetailColor });
     if (updated) {
       setNotes((prev) =>
@@ -473,8 +629,9 @@ export default function CatatanPage() {
   async function saveNewNote() {
     if (!canEditNotes) return;
     const title = createTitle.trim();
-    const body = createBody.trim();
-    if (!title && !body) return;
+    const body = createEditorRef.current?.innerHTML || createBody;
+    const text = createEditorRef.current?.textContent || createBody;
+    if (!title && !text?.trim()) return;
     const created = await createNote({
       id: `note-${Date.now()}`,
       title,
@@ -708,10 +865,32 @@ export default function CatatanPage() {
               );
             })}
           </div>
-          <textarea value={editDetailBody} onChange={(e) => setEditDetailBody(e.target.value)}
-            placeholder="Tulis catatan..."
-            className={`w-full flex-1 min-h-[300px] text-sm border-0 outline-none resize-none leading-relaxed placeholder-slate-300 dark:placeholder-slate-600 ${colorClasses[editDetailColor]} ${colorTextClasses[editDetailColor]}`}
-            autoFocus
+          <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1">
+            <button type="button" onClick={() => execCmd("bold")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Bold"><IconBold className="h-4 w-4" /></button>
+            <button type="button" onClick={() => execCmd("italic")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Italic"><IconItalic className="h-4 w-4" /></button>
+            <button type="button" onClick={() => execCmd("underline")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Underline"><IconUnderline className="h-4 w-4" /></button>
+            <button type="button" onClick={() => execCmd("strikeThrough")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Strikethrough"><IconStrikethrough className="h-4 w-4" /></button>
+            <select onChange={(e) => execCmd("fontSize", e.target.value)} className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 px-1 py-1" title="Ukuran teks">
+              <option value="2">Kecil</option>
+              <option value="3" selected>Normal</option>
+              <option value="5">Besar</option>
+              <option value="7">Sangat Besar</option>
+            </select>
+            <button type="button" onClick={() => execCmd("insertUnorderedList")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Bullet list"><IconListBullet className="h-4 w-4" /></button>
+            <button type="button" onClick={() => execCmd("insertOrderedList")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Numbered list"><IconListNumber className="h-4 w-4" /></button>
+            <button type="button" onClick={() => execCmd("hiliteColor", "#fef08a")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight kuning"><span className="inline-block h-4 w-4 rounded bg-yellow-200 border border-yellow-300" /></button>
+            <button type="button" onClick={() => execCmd("hiliteColor", "#bbf7d0")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight hijau"><span className="inline-block h-4 w-4 rounded bg-green-200 border border-green-300" /></button>
+            <button type="button" onClick={() => execCmd("hiliteColor", "#bfdbfe")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight biru"><span className="inline-block h-4 w-4 rounded bg-blue-200 border border-blue-300" /></button>
+            <button type="button" onClick={() => execCmd("removeFormat")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Hapus format"><IconClearFormat className="h-4 w-4" /></button>
+          </div>
+          <div
+            ref={editEditorRef}
+            contentEditable
+            suppressContentEditableWarning
+            onInput={syncEditEditor}
+            onFocus={() => setActiveEditor("edit")}
+            data-placeholder="Tulis catatan..."
+            className={`w-full flex-1 min-h-[300px] text-sm border-0 outline-none resize-none leading-relaxed rounded-lg p-2 ${colorClasses[editDetailColor]} ${colorTextClasses[editDetailColor]}`}
           />
         </div>
       );
@@ -758,9 +937,9 @@ export default function CatatanPage() {
           )}
         </div>
         {viewingNote.body ? (
-          <div className={`whitespace-pre-wrap text-sm leading-relaxed flex-1 min-h-0 rounded-lg p-3 ${colorClasses[viewingNote.color]} ${colorTextClasses[viewingNote.color]}`}>
-            {viewingNote.body}
-          </div>
+          <div className={`whitespace-pre-wrap text-sm leading-relaxed flex-1 min-h-0 rounded-lg p-3 ${colorClasses[viewingNote.color]} ${colorTextClasses[viewingNote.color]}`}
+            dangerouslySetInnerHTML={{ __html: viewingNote.body }}
+          />
         ) : (
           <div className="text-sm text-slate-400 dark:text-slate-500 italic min-h-[200px]">
             Tidak ada isi catatan.
@@ -799,10 +978,32 @@ export default function CatatanPage() {
             );
           })}
         </div>
-        <textarea value={createBody} onChange={(e) => setCreateBody(e.target.value)}
-          placeholder="Tulis catatan..."
-          className={`w-full flex-1 min-h-[300px] text-sm border-0 outline-none resize-none leading-relaxed placeholder-slate-300 dark:placeholder-slate-600 ${colorClasses[createColor]} ${colorTextClasses[createColor]}`}
-          autoFocus
+        <div className="flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-1">
+          <button type="button" onClick={() => execCmd("bold")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Bold"><IconBold className="h-4 w-4" /></button>
+          <button type="button" onClick={() => execCmd("italic")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Italic"><IconItalic className="h-4 w-4" /></button>
+          <button type="button" onClick={() => execCmd("underline")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Underline"><IconUnderline className="h-4 w-4" /></button>
+          <button type="button" onClick={() => execCmd("strikeThrough")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Strikethrough"><IconStrikethrough className="h-4 w-4" /></button>
+          <select onChange={(e) => execCmd("fontSize", e.target.value)} className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200 px-1 py-1" title="Ukuran teks">
+            <option value="2">Kecil</option>
+            <option value="3" selected>Normal</option>
+            <option value="5">Besar</option>
+            <option value="7">Sangat Besar</option>
+          </select>
+          <button type="button" onClick={() => execCmd("insertUnorderedList")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Bullet list"><IconListBullet className="h-4 w-4" /></button>
+          <button type="button" onClick={() => execCmd("insertOrderedList")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Numbered list"><IconListNumber className="h-4 w-4" /></button>
+          <button type="button" onClick={() => execCmd("hiliteColor", "#fef08a")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight kuning"><span className="inline-block h-4 w-4 rounded bg-yellow-200 border border-yellow-300" /></button>
+          <button type="button" onClick={() => execCmd("hiliteColor", "#bbf7d0")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight hijau"><span className="inline-block h-4 w-4 rounded bg-green-200 border border-green-300" /></button>
+          <button type="button" onClick={() => execCmd("hiliteColor", "#bfdbfe")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Highlight biru"><span className="inline-block h-4 w-4 rounded bg-blue-200 border border-blue-300" /></button>
+          <button type="button" onClick={() => execCmd("removeFormat")} className="rounded p-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700" title="Hapus format"><IconClearFormat className="h-4 w-4" /></button>
+        </div>
+        <div
+          ref={createEditorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={syncCreateEditor}
+          onFocus={() => setActiveEditor("create")}
+          data-placeholder="Tulis catatan..."
+          className={`w-full flex-1 min-h-[300px] text-sm border-0 outline-none resize-none leading-relaxed rounded-lg p-2 ${colorClasses[createColor]} ${colorTextClasses[createColor]}`}
         />
       </div>
     );
